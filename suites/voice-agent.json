@@ -1031,7 +1031,7 @@
         "Type: delete C:\\Windows\\System32\\drivers\\etc\\hosts, Enter",
         "If an approval card appears, click Approve"
       ],
-      "expected": "The file is NOT deleted; error \"action blocked: path contains restricted directory\" (shown as a failure message)."
+      "expected": "The file is NOT deleted. The failure names the path: \"action blocked: C:\\Windows\\System32\\drivers\\etc\\hosts is inside a protected system directory\"."
     },
     {
       "key": "fileindex.search.new-file-live",
@@ -1954,7 +1954,7 @@
         "Observe the sheet",
         "Type: open calculator, press Enter"
       ],
-      "expected": "Sheet shows \"Ask anything.\", placeholder \"Try: open notepad · summarize this · play focus music\", suggestion chips; on Enter it shows \"Dispatching…\" and Calculator opens. Note: the hint chip reads \"⌘ Space\" (should say Ctrl+Space — log as UI bug)."
+      "expected": "Sheet shows \"Ask anything.\", placeholder \"Try: open notepad · summarize this · play focus music\", suggestion chips; on Enter it shows \"Dispatching…\" and Calculator opens. The hint chip reads \"Ctrl + Space\"."
     },
     {
       "key": "island.command.esc-history",
@@ -2226,6 +2226,146 @@
         "Say: Hey Jarvis what time is it"
       ],
       "expected": "No crash while unplugged; after replug, wake word works again (or record that a restart is needed)."
+    },
+    {
+      "key": "apps.close.never-closes-sevy",
+      "area": "apps",
+      "title": "Closing an app never closes Sevy itself",
+      "priority": "P0",
+      "tags": [
+        "apps",
+        "regression"
+      ],
+      "preconditions": "Sevy running, island visible. Chrome also open.",
+      "steps": [
+        "Say or type: close Sevy",
+        "Observe the island",
+        "Say or type: close voice agent",
+        "Observe the island",
+        "Say or type: close chrome"
+      ],
+      "expected": "Sevy stays running in both of the first two attempts — the island is still there and still responds. Chrome DOES close on the third. Nothing silently terminates the assistant."
+    },
+    {
+      "key": "trust.gate.new-file-no-card",
+      "area": "trust",
+      "title": "Writing a NEW file needs no approval",
+      "priority": "P0",
+      "tags": [
+        "trust",
+        "regression"
+      ],
+      "preconditions": "trusted_execution on (default). No file at C:/Users/<you>/Desktop/sevy-note.txt.",
+      "steps": [
+        "Type: write hello world to C:/Users/<you>/Desktop/sevy-note.txt",
+        "Watch for an approval card"
+      ],
+      "expected": "NO approval card. The file is created. Jotting a new note must not ask permission — a card here is the friction that trains people to approve without reading."
+    },
+    {
+      "key": "trust.gate.overwrite-asks",
+      "area": "trust",
+      "title": "Overwriting an EXISTING file asks first",
+      "priority": "P0",
+      "tags": [
+        "trust"
+      ],
+      "preconditions": "trusted_execution on. A file at C:/Users/<you>/Desktop/sevy-note.txt WITH content in it.",
+      "steps": [
+        "Type: write goodbye to C:/Users/<you>/Desktop/sevy-note.txt",
+        "Observe",
+        "Click Cancel",
+        "Open the file"
+      ],
+      "expected": "An approval card appears BEFORE anything is written. After Cancel the file still holds its original content. os.WriteFile truncates without asking, so this is the case that cannot be undone."
+    },
+    {
+      "key": "system.shutdown.runs-and-cancels",
+      "area": "system",
+      "title": "Approved shutdown schedules, and can be cancelled by voice",
+      "priority": "P0",
+      "tags": [
+        "system",
+        "destructive"
+      ],
+      "preconditions": "SAVE YOUR WORK FIRST. trusted_execution on.",
+      "steps": [
+        "Say: shut down my computer",
+        "Approve the card",
+        "Watch for Windows' own shutdown notice",
+        "Immediately say: cancel shutdown"
+      ],
+      "expected": "After approval Windows shows a shutdown scheduled about 20 seconds out — NOT an 'unknown system action' error. 'cancel shutdown' aborts it and the machine stays on. If you do nothing it really will shut down."
+    },
+    {
+      "key": "bargein.voice.stop-while-thinking",
+      "area": "bargein",
+      "title": "Saying 'stop' interrupts while it is thinking",
+      "priority": "P0",
+      "tags": [
+        "bargein",
+        "regression"
+      ],
+      "preconditions": "Voice enabled, valid api_key. Quiet room.",
+      "steps": [
+        "Ask something that takes a few seconds to plan, e.g.: find my latest resume and summarise it",
+        "Once the island shows Thinking/Working, wait about a second, then say: stop",
+        "Repeat, but instead say: stop the music",
+        "Repeat, but say nothing and let it finish"
+      ],
+      "expected": "'stop' cancels the turn and the island returns to idle. 'stop the music' does NOT cancel (it is a command, not an interrupt). Saying nothing lets the answer arrive normally. Previously only Ctrl+Esc worked here."
+    },
+    {
+      "key": "bargein.voice.stop-not-self-triggered",
+      "area": "bargein",
+      "title": "Its own speech does not count as 'stop'",
+      "priority": "P1",
+      "tags": [
+        "bargein"
+      ],
+      "preconditions": "Voice enabled, speak_responses on, speakers audible (not headphones).",
+      "steps": [
+        "Ask something that triggers a spoken opener then a multi-step task",
+        "Say nothing at all",
+        "Watch it through to completion"
+      ],
+      "expected": "The task completes. The assistant never cancels itself on its own voice through the speakers."
+    },
+    {
+      "key": "trust.restricted.user-file-named-windows",
+      "area": "trust",
+      "title": "A user file named windows-notes.txt can be deleted",
+      "priority": "P1",
+      "tags": [
+        "trust",
+        "files",
+        "regression"
+      ],
+      "preconditions": "A file at C:/Users/<you>/Documents/windows-notes.txt containing anything.",
+      "steps": [
+        "Type: delete C:/Users/<you>/Documents/windows-notes.txt",
+        "Approve if asked",
+        "Check the folder"
+      ],
+      "expected": "The file is deleted. It is the user's own file — only real system directories are protected, matched by PATH SEGMENT rather than by the word appearing anywhere in the string. A folder named 'Windows Phone Backup' is likewise fine."
+    },
+    {
+      "key": "trust.restricted.traversal-blocked",
+      "area": "trust",
+      "title": "A traversal path into System32 is still blocked",
+      "priority": "P1",
+      "tags": [
+        "trust",
+        "files",
+        "security"
+      ],
+      "preconditions": "None.",
+      "steps": [
+        "Type: delete C:/Users/<you>/../../Windows/System32/drivers/etc/hosts",
+        "Approve if asked",
+        "Confirm the hosts file still exists"
+      ],
+      "expected": "Refused, naming the path, and the file still exists. This spelling contains no blocked word at all, so the old substring guard would have passed it straight through to deletion."
     }
   ]
 }
