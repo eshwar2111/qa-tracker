@@ -52,6 +52,9 @@ const statusBadge = s => `<span class="badge s-${esc(s)}">${esc(STATUS_LABEL[s] 
 const resultBadge = r => r ? `<span class="badge s-${esc(r)}">${esc(r)}</span>` : '<span class="muted">—</span>';
 const prioBadge = p => `<span class="badge b-prio b-${esc(p)}">${esc(p)}</span>`;
 const regressBadge = c => c.reopen_count > 0 ? `<span class="badge b-regress" title="Failed again after a fix">Regression ×${c.reopen_count}</span>` : '';
+const IDEA_LABEL = { new: 'New', in_progress: 'In progress', done: 'Built — check it', accepted: 'Accepted', declined: 'Declined' };
+const IDEA_CLASS = { new: 's-untested', in_progress: 's-in_fix', done: 's-fixed', accepted: 's-pass', declined: 's-blocked' };
+const ideaBadge = s => `<span class="badge ${IDEA_CLASS[s] || ''}">${esc(IDEA_LABEL[s] || s)}</span>`;
 const who = a => a === 'claude' ? '<span class="who-claude">Claude</span>' : '<span class="who-user">You</span>';
 
 // ---------- state ----------
@@ -88,6 +91,8 @@ qa import suites\\voice-agent.json</pre></div>`;
     else if (parts[0] === 'cases') { setNav('cases'); await viewCases(q); }
     else if (parts[0] === 'runs' && parts[1]) { setNav('runs'); await viewRun(+parts[1], q); }
     else if (parts[0] === 'runs') { setNav('runs'); await viewRuns(); }
+    else if (parts[0] === 'ideas' && parts[1]) { setNav('ideas'); await viewIdea(+parts[1]); }
+    else if (parts[0] === 'ideas') { setNav('ideas'); await viewIdeas(q); }
     else { setNav('dash'); await viewDashboard(); }
   } catch (e) {
     app.innerHTML = `<div class="card empty"><h2>Something went wrong</h2><p>${esc(e.message)}</p></div>`;
@@ -128,6 +133,11 @@ async function viewDashboard() {
           ${sev.length ? sev.map(k => `<div class="row"><span class="badge ${k === 'critical' ? 'b-regress' : 'b-prio'}">${k}</span> ${s.open_by_severity[k]}</div>`).join('') : '<p class="muted">No open bugs.</p>'}
         </div>
         <div class="card">
+          <h2><a href="#/ideas">Ideas</a></h2>
+          <div class="row">${['done', 'new', 'in_progress', 'accepted', 'declined'].map(k => `<a class="badge ${IDEA_CLASS[k]}" href="#/ideas?status=${k}">${s.ideas[k] || 0} ${esc(IDEA_LABEL[k])}</a>`).join(' ')}</div>
+          ${s.ideas.done ? `<p style="margin:0">${s.ideas.done} idea(s) built by Claude are waiting for you to check.</p>` : ''}
+        </div>
+        <div class="card">
           <h2>Regressions</h2>
           ${s.regressions.length ? `<ul class="feed">${s.regressions.map(c => `<li><a href="#/cases/${c.id}">${esc(c.title)}</a> ${statusBadge(c.status)} ${regressBadge(c)}</li>`).join('')}</ul>` : '<p class="muted">None — nothing has failed after a fix.</p>'}
         </div>
@@ -143,8 +153,18 @@ async function viewDashboard() {
 // ---------- events → text ----------
 function eventText(e, withCase) {
   const d = e.data || {};
-  const c = withCase && e.case_id ? ` <a href="#/cases/${e.case_id}">${esc(e.case_title || e.case_key)}</a>` : '';
+  const c = withCase && e.case_id ? ` <a href="#/cases/${e.case_id}">${esc(e.case_title || e.case_key)}</a>`
+    : withCase && e.idea_id ? ` idea <a href="#/ideas/${e.idea_id}">${esc(e.idea_title)}</a>` : '';
   switch (e.kind) {
+    case 'idea_created': return `added${c || ' this idea'}`;
+    case 'idea_edited': return `edited${c || ' the idea'}`;
+    case 'idea_picked': return `started working on${c || ' it'}`;
+    case 'idea_done': return `built${c || ' it'}${d.commit ? ` in <code>${esc(d.commit)}</code>` : ''} — <b>please check</b>`;
+    case 'idea_declined': return `declined${c || ' it'}`;
+    case 'idea_accepted': return `accepted${c || ' it'} ✓`;
+    case 'idea_reopened': return `sent back${c || ''} — not quite`;
+    case 'idea_comment': return `commented${c ? ' on' + c : ''}`;
+    case 'idea_attachment': return `attached <a href="/api/idea-attachments/${esc(d.idea_attachment_id)}" target="_blank">${esc(d.filename)}</a>${c ? ' to' + c : ''}`;
     case 'project_created': return `created project ${esc(d.key)}`;
     case 'case_created': return `added case${c}`;
     case 'case_updated': {
@@ -167,7 +187,12 @@ function eventText(e, withCase) {
 function eventBody(e) {
   const d = e.data || {};
   if (e.kind === 'result' && d.remarks) return d.remarks;
-  if (e.kind === 'comment') return d.text;
+  if (e.kind === 'comment' || e.kind === 'idea_comment') return d.text;
+  if (e.kind === 'idea_reopened') return d.remarks;
+  if (e.kind === 'idea_edited') return 'Was: ' + d.previous;
+  if (e.kind === 'idea_picked' || e.kind === 'idea_done' || e.kind === 'idea_declined') {
+    return (d.note || '') + (d.files && d.files.length ? '\nFiles: ' + d.files.join(', ') : '') + (d.cases && d.cases.length ? '\nTest cases: ' + d.cases.join(', ') : '');
+  }
   if (e.kind === 'fixed') return d.note + (d.files && d.files.length ? '\nFiles: ' + d.files.join(', ') : '');
   return '';
 }
@@ -589,6 +614,198 @@ async function runMark(result) {
   renderRun();
 }
 
+// ---------- ideas ----------
+// Files pasted/dropped into the idea composer, uploaded after the idea is created.
+let ideaFiles = [];
+
+async function viewIdeas(q) {
+  const status = q.get('status') || '';
+  const [ideas, all] = await Promise.all([
+    api(`/projects/${P()}/ideas${status ? '?status=' + encodeURIComponent(status) : ''}`),
+    status ? api(`/projects/${P()}/ideas`) : null,
+  ]);
+  const counts = {};
+  for (const i of (all || ideas)) counts[i.status] = (counts[i.status] || 0) + 1;
+  const total = (all || ideas).length;
+  const chip = (val, label, n) => `<button class="chip ${status === val ? 'on' : ''}" data-status="${val}">${label} (${n})</button>`;
+
+  app.innerHTML = `
+    <h1>Ideas</h1>
+    <div class="card">
+      <label for="idea-text"><b>New idea</b> <span class="muted">— write freely; first line becomes the title. Ctrl+Enter to add. Paste or drop screenshots/sketches.</span></label>
+      <textarea id="idea-text" rows="4" placeholder="e.g. Show a live waveform on the island while I'm talking…" style="margin-top:6px"></textarea>
+      <ul id="idea-files" class="files"></ul>
+      <div class="row end">
+        <span class="muted" style="margin-right:auto">Tell Claude <b>“pick up my new ideas”</b> to have them built.</span>
+        <button class="btn" id="idea-attach">Attach…</button>
+        <button class="btn primary" id="idea-add">Add idea</button>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="chips">
+        ${chip('', 'All', total)}
+        ${['done', 'new', 'in_progress', 'accepted', 'declined'].map(k => chip(k, IDEA_LABEL[k], counts[k] || 0)).join('')}
+      </div>
+      <ul class="feed" style="margin-top:10px">
+        ${ideas.map(i => `<li class="click-row" data-id="${i.id}" style="cursor:pointer">
+          <div class="row" style="margin:0">${ideaBadge(i.status)} <b>${esc(i.title)}</b>
+            ${i.reopen_count ? `<span class="badge b-regress" title="Sent back after Claude built it">sent back ×${i.reopen_count}</span>` : ''}
+            <span class="spacer"></span><span class="muted" title="${esc(fullTime(i.updated_at))}">#${i.id} · ${ago(i.updated_at)}</span></div>
+          ${i.text.includes('\n') ? `<div class="muted" style="white-space:pre-wrap;max-height:3em;overflow:hidden">${esc(i.text.slice(i.text.indexOf('\n') + 1))}</div>` : ''}
+        </li>`).join('') || '<li class="empty">No ideas here yet.</li>'}
+      </ul>
+    </div>`;
+
+  const ta = $('#idea-text');
+  ta.value = store.get('qa.ideaDraft', '');
+  ta.oninput = () => store.set('qa.ideaDraft', ta.value);
+  const renderFiles = () => {
+    $('#idea-files').innerHTML = ideaFiles.map((f, i) => `<li>${esc(f.name)} <a href="#" data-rm="${i}">remove</a></li>`).join('');
+    $$('[data-rm]', $('#idea-files')).forEach(a => a.onclick = e => { e.preventDefault(); ideaFiles.splice(+a.dataset.rm, 1); renderFiles(); });
+  };
+  const addIdeaFiles = list => {
+    for (const f of list) {
+      if (f.size > 20 * 1024 * 1024) { toast(`${f.name} is over 20 MB`, true); continue; }
+      ideaFiles.push(f.name && f.name !== 'image.png' ? f : new File([f], `screenshot-${Date.now()}.png`, { type: f.type }));
+    }
+    renderFiles();
+  };
+  renderFiles();
+  ta.addEventListener('paste', e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); addIdeaFiles(fs); } });
+  ta.addEventListener('dragover', e => e.preventDefault());
+  ta.addEventListener('drop', e => { if (e.dataTransfer.files.length) { e.preventDefault(); addIdeaFiles(e.dataTransfer.files); } });
+  $('#idea-attach').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.onchange = () => addIdeaFiles(i.files); i.click(); };
+  const add = async () => {
+    const text = ta.value.trim();
+    if (!text) { ta.focus(); return; }
+    $('#idea-add').disabled = true;
+    try {
+      const idea = await api(`/projects/${P()}/ideas`, { method: 'POST', body: { text } });
+      for (const f of ideaFiles) {
+        const fd = new FormData(); fd.append('file', f, f.name);
+        try { await api(`/ideas/${idea.id}/attachments`, { method: 'POST', body: fd }); } catch (e) { toast(`${f.name}: ${e.message}`, true); }
+      }
+      ideaFiles = [];
+      store.del('qa.ideaDraft');
+      toast(`Idea #${idea.id} saved`);
+      await viewIdeas(q);
+    } catch (e) { toast(e.message, true); $('#idea-add').disabled = false; }
+  };
+  $('#idea-add').onclick = add;
+  ta.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); add(); } };
+  $$('.chip', app).forEach(b => b.onclick = () => { location.hash = '#/ideas' + (b.dataset.status ? '?status=' + b.dataset.status : ''); });
+  $$('.click-row', app).forEach(li => li.onclick = () => location.hash = '#/ideas/' + li.dataset.id);
+  state.render = () => viewIdeas(q);
+}
+
+async function viewIdea(id) {
+  const i = await api(`/ideas/${id}`);
+  const lastClaude = [...i.events].reverse().find(e => ['idea_done', 'idea_declined', 'idea_picked'].includes(e.kind));
+  const ld = lastClaude ? lastClaude.data : {};
+  const canReopen = ['done', 'declined', 'accepted'].includes(i.status);
+
+  let banner = '';
+  if (i.status === 'done') {
+    banner = `<div class="fixnote"><div class="t">Claude built this — please check it</div><div style="white-space:pre-wrap">${esc(ld.note)}</div>
+      ${ld.commit || (ld.cases && ld.cases.length) ? `<div class="muted">${ld.commit ? `commit <code>${esc(ld.commit)}</code>` : ''}${ld.cases && ld.cases.length ? ` · test cases: ${ld.cases.map(k => `<a href="#/cases?q=${encodeURIComponent(k)}">${esc(k)}</a>`).join(', ')}` : ''}</div>` : ''}</div>`;
+  } else if (i.status === 'declined') {
+    banner = `<div class="prev"><b>Claude declined this:</b> ${esc(ld.note)}</div>`;
+  } else if (i.status === 'in_progress') {
+    banner = `<div class="fixnote" style="border-color:var(--infix);background:var(--infix-soft)"><div class="t" style="color:var(--infix)">Claude is working on this</div>${ld.note ? `<div style="white-space:pre-wrap">${esc(ld.note)}</div>` : ''}</div>`;
+  }
+
+  app.innerHTML = `
+    <p><a href="#/ideas">← Ideas</a></p>
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="row" style="margin-top:0">${ideaBadge(i.status)} ${i.reopen_count ? `<span class="badge b-regress">sent back ×${i.reopen_count}</span>` : ''}
+          <span class="muted">#${i.id} · added ${ago(i.created_at)}</span></div>
+        <h1>${esc(i.title)}</h1>
+        ${banner}
+        <div id="idea-body" class="pre">${esc(i.text)}</div>
+        <div class="row">
+          ${i.status === 'new' ? '<button class="btn" id="idea-edit">Edit</button>' : ''}
+          ${i.status === 'done' ? '<button class="btn pass" id="idea-accept">Works ✓</button>' : ''}
+          ${canReopen ? `<button class="btn danger" id="idea-reopen">${i.status === 'done' ? 'Not quite…' : 'Reopen…'}</button>` : ''}
+          <button class="btn" id="idea-attach2">Attach…</button>
+        </div>
+        <div id="reopen-box" hidden>
+          <textarea id="reopen-text" rows="4" placeholder="What's not right / what should change? (Ctrl+Enter)"></textarea>
+          <div class="row end"><button class="btn" id="reopen-cancel">Cancel</button><button class="btn danger" id="reopen-send">Send back to Claude</button></div>
+        </div>
+        ${i.attachments.length ? `<h3>Attachments</h3><div class="gallery">${i.attachments.map(a => a.mime.startsWith('image/')
+          ? `<a href="/api/idea-attachments/${a.id}" target="_blank"><img src="/api/idea-attachments/${a.id}" alt="${esc(a.filename)}" loading="lazy"></a>`
+          : `<a class="file" href="/api/idea-attachments/${a.id}" target="_blank">📄 ${esc(a.filename)}</a>`).join('')}</div>` : ''}
+      </div>
+      <div class="card">
+        <h2>Thread</h2>
+        <ul class="timeline">${i.events.slice().reverse().map(e => `
+          <li class="k-${esc(e.kind)}">
+            <div>${who(e.actor)} ${eventText(e, false)}</div>
+            ${eventBody(e) ? `<div class="body">${esc(eventBody(e))}</div>` : ''}
+            <div class="when" title="${esc(fullTime(e.created_at))}">${ago(e.created_at)}</div>
+          </li>`).join('')}</ul>
+        <h3>Add a comment</h3>
+        <textarea id="comment" rows="3" placeholder="More detail for Claude (Ctrl+Enter)"></textarea>
+        <div class="row end"><button class="btn" id="comment-btn">Comment</button></div>
+      </div>
+    </div>`;
+
+  const post = async (path, body) => {
+    try { await api(`/ideas/${id}/${path}`, { method: 'POST', body }); await viewIdea(id); }
+    catch (e) { toast(e.message, true); }
+  };
+  const sendComment = () => { const t = $('#comment').value.trim(); if (t) post('comment', { text: t }); };
+  $('#comment-btn').onclick = sendComment;
+  $('#comment').onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendComment(); };
+  $('#idea-accept') && ($('#idea-accept').onclick = () => post('accept'));
+  if ($('#idea-reopen')) {
+    $('#idea-reopen').onclick = () => { $('#reopen-box').hidden = false; $('#reopen-text').focus(); };
+    $('#reopen-cancel').onclick = () => { $('#reopen-box').hidden = true; };
+    const send = () => { const t = $('#reopen-text').value.trim(); if (!t) { toast('Say what should change.', true); return; } post('reopen', { remarks: t }); };
+    $('#reopen-send').onclick = send;
+    $('#reopen-text').onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) send(); };
+  }
+  $('#idea-attach2').onclick = () => {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true;
+    inp.onchange = async () => {
+      for (const f of inp.files) {
+        const fd = new FormData(); fd.append('file', f, f.name);
+        try { await api(`/ideas/${id}/attachments`, { method: 'POST', body: fd }); } catch (e) { toast(`${f.name}: ${e.message}`, true); }
+      }
+      await viewIdea(id);
+    };
+    inp.click();
+  };
+  if ($('#idea-edit')) $('#idea-edit').onclick = () => {
+    const body = $('#idea-body');
+    body.outerHTML = `<textarea id="idea-edit-text" rows="6">${esc(i.text)}</textarea>
+      <div class="row end"><button class="btn" id="edit-cancel">Cancel</button><button class="btn primary" id="edit-save">Save</button></div>`;
+    $('#idea-edit').hidden = true;
+    const t = $('#idea-edit-text'); t.focus();
+    $('#edit-cancel').onclick = () => viewIdea(id);
+    const save = async () => {
+      try { await api(`/ideas/${id}`, { method: 'PUT', body: { text: t.value } }); await viewIdea(id); }
+      catch (e) { toast(e.message, true); }
+    };
+    $('#edit-save').onclick = save;
+    t.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save(); };
+  };
+  state.render = () => viewIdea(id);
+}
+
+async function refreshIdeasBadge() {
+  if (!state.project) return;
+  try {
+    const { summary } = await api(`/projects/${P()}/summary`);
+    const n = summary.ideas.done || 0;
+    const b = $('#ideas-badge');
+    b.hidden = !n;
+    b.textContent = n;
+    b.title = `${n} idea(s) built by Claude, waiting for you to check`;
+  } catch { /* next poll retries */ }
+}
+
 // ---------- keyboard ----------
 document.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase();
@@ -633,10 +850,14 @@ async function poll() {
       if (n('claimed')) parts.push(`started fixing ${n('claimed')}`);
       if (n('case_created')) parts.push(`added ${n('case_created')} case(s)`);
       if (n('case_updated')) parts.push(`updated ${n('case_updated')} case(s)`);
-      if (n('comment')) parts.push(`left ${n('comment')} comment(s)`);
+      if (n('comment') || n('idea_comment')) parts.push(`left ${n('comment') + n('idea_comment')} comment(s)`);
+      if (n('idea_picked')) parts.push(`started on ${n('idea_picked')} idea(s)`);
+      if (n('idea_done')) parts.push(`built ${n('idea_done')} idea(s) — check them in Ideas`);
+      if (n('idea_declined')) parts.push(`declined ${n('idea_declined')} idea(s)`);
       if (parts.length) toast('Claude ' + parts.join(', '));
       state.areas = [];
     }
+    if (evs.some(e => e.idea_id)) refreshIdeasBadge();
     await refreshView();
   } catch {
     $('#live').classList.add('off');
@@ -661,6 +882,7 @@ async function boot() {
     state.areas = []; player.run = null; await syncCursor(); location.hash = '#/'; route();
   };
   await syncCursor();
+  refreshIdeasBadge();
   window.addEventListener('hashchange', route);
   await route();
   setInterval(poll, 3000);

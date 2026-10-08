@@ -38,6 +38,15 @@ func New(st *store.Store) *Server {
 	m.HandleFunc("GET /api/runs/{id}", s.run)
 	m.HandleFunc("POST /api/runs/{id}/close", s.closeRun)
 	m.HandleFunc("GET /api/events", s.events)
+	m.HandleFunc("GET /api/projects/{p}/ideas", s.withProject(s.ideas))
+	m.HandleFunc("POST /api/projects/{p}/ideas", s.withProject(s.createIdea))
+	m.HandleFunc("GET /api/ideas/{id}", s.ideaDetail)
+	m.HandleFunc("PUT /api/ideas/{id}", s.editIdea)
+	m.HandleFunc("POST /api/ideas/{id}/accept", s.acceptIdea)
+	m.HandleFunc("POST /api/ideas/{id}/reopen", s.reopenIdea)
+	m.HandleFunc("POST /api/ideas/{id}/comment", s.commentIdea)
+	m.HandleFunc("POST /api/ideas/{id}/attachments", s.uploadIdea)
+	m.HandleFunc("GET /api/idea-attachments/{id}", s.ideaAttachment)
 
 	static, _ := fs.Sub(web.Static, "static")
 	m.Handle("GET /", http.FileServerFS(static))
@@ -239,24 +248,30 @@ func (s *Server) attachment(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	f, err := os.Open(a.Path)
+	serveFile(w, r, a.Path, a.Mime, a.Filename)
+}
+
+// serveFile serves an uploaded file; text is always plain so uploaded HTML
+// can never execute.
+func serveFile(w http.ResponseWriter, r *http.Request, path, mime, filename string) {
+	f, err := os.Open(path)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	defer f.Close()
-	inline := strings.HasPrefix(a.Mime, "image/") || strings.HasPrefix(a.Mime, "text/") || a.Mime == "application/pdf"
+	inline := strings.HasPrefix(mime, "image/") || strings.HasPrefix(mime, "text/") || mime == "application/pdf"
 	disp := "attachment"
 	if inline {
 		disp = "inline"
 	}
-	ct := a.Mime
+	ct := mime
 	if strings.HasPrefix(ct, "text/") {
-		ct = "text/plain; charset=utf-8" // never render uploaded HTML
+		ct = "text/plain; charset=utf-8"
 	}
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Disposition", disp+`; filename="`+strings.ReplaceAll(a.Filename, `"`, "")+`"`)
+	w.Header().Set("Content-Disposition", disp+`; filename="`+strings.ReplaceAll(filename, `"`, "")+`"`)
 	http.ServeContent(w, r, "", fileModTime(f), f)
 }
 

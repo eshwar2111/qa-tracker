@@ -20,41 +20,11 @@ const MaxAttachment = 20 << 20
 // AddAttachment stores a file (deduplicated by content hash) and links it to
 // a case, optionally within a run.
 func (s *Store) AddAttachment(caseID int64, runID *int64, filename string, r io.Reader, actor Actor) (*Attachment, error) {
-	data, err := io.ReadAll(io.LimitReader(r, MaxAttachment+1))
+	b, err := s.saveBlob(filename, r)
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > MaxAttachment {
-		return nil, fmt.Errorf("%w: attachment larger than 20 MB", ErrValidation)
-	}
-	if len(data) == 0 {
-		return nil, fmt.Errorf("%w: attachment is empty", ErrValidation)
-	}
-	filename = filepath.Base(strings.TrimSpace(filename))
-	if filename == "" || filename == "." || filename == string(filepath.Separator) {
-		filename = "attachment"
-	}
-	sum := sha256.Sum256(data)
-	hash := hex.EncodeToString(sum[:])
-	ext := strings.ToLower(filepath.Ext(filename))
-	mt := mime.TypeByExtension(ext)
-	if mt == "" || ext == ".log" {
-		mt = http.DetectContentType(data)
-	}
-	if ext == "" {
-		if exts, _ := mime.ExtensionsByType(strings.Split(mt, ";")[0]); len(exts) > 0 {
-			ext = exts[0]
-		}
-	}
-	if err := os.MkdirAll(s.AttachDir, 0o755); err != nil {
-		return nil, err
-	}
-	path := filepath.Join(s.AttachDir, hash+ext)
-	if _, err := os.Stat(path); err != nil {
-		if err := os.WriteFile(path, data, 0o644); err != nil {
-			return nil, err
-		}
-	}
+	filename, mt, hash, path, data := b.filename, b.mime, b.sha, b.path, b.data
 
 	var a *Attachment
 	err = s.tx(func(tx *sql.Tx) error {
@@ -120,4 +90,50 @@ func (s *Store) caseAttachments(caseID int64) ([]Attachment, error) {
 		out = append(out, *a)
 	}
 	return out, rows.Err()
+}
+
+type blob struct {
+	filename, mime, sha, path string
+	data                      []byte
+}
+
+// saveBlob validates an upload and stores it content-addressed under AttachDir.
+func (s *Store) saveBlob(filename string, r io.Reader) (*blob, error) {
+	data, err := io.ReadAll(io.LimitReader(r, MaxAttachment+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > MaxAttachment {
+		return nil, fmt.Errorf("%w: attachment larger than 20 MB", ErrValidation)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("%w: attachment is empty", ErrValidation)
+	}
+	filename = filepath.Base(strings.TrimSpace(filename))
+	if filename == "" || filename == "." || filename == string(filepath.Separator) {
+		filename = "attachment"
+	}
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	ext := strings.ToLower(filepath.Ext(filename))
+	mt := mime.TypeByExtension(ext)
+	if mt == "" || ext == ".log" {
+		mt = http.DetectContentType(data)
+	}
+	if ext == "" {
+		if exts, _ := mime.ExtensionsByType(strings.Split(mt, ";")[0]); len(exts) > 0 {
+			ext = exts[0]
+		}
+	}
+	if err := os.MkdirAll(s.AttachDir, 0o755); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(s.AttachDir, hash+ext)
+	if _, err := os.Stat(path); err != nil {
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			return nil, err
+		}
+	}
+
+	return &blob{filename: filename, mime: mt, sha: hash, path: path, data: data}, nil
 }

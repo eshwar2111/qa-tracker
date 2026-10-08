@@ -155,3 +155,52 @@ func TestServesIndex(t *testing.T) {
 		t.Fatalf("index %d", res.StatusCode)
 	}
 }
+
+func TestIdeasAPI(t *testing.T) {
+	ts, st, _ := setup(t)
+	var i store.Idea
+	if code := call(t, "POST", ts.URL+"/api/projects/va/ideas", map[string]any{"text": "Dark mode toggle\nfor the island"}, &i); code != 200 || i.Title != "Dark mode toggle" {
+		t.Fatalf("create %d %+v", code, i)
+	}
+	if code := call(t, "POST", ts.URL+"/api/projects/va/ideas", map[string]any{"text": " "}, nil); code != 400 {
+		t.Fatalf("empty idea %d", code)
+	}
+	if code := call(t, "PUT", fmt.Sprintf("%s/api/ideas/%d", ts.URL, i.ID), map[string]any{"text": "Dark mode toggle v2"}, &i); code != 200 || i.Text != "Dark mode toggle v2" {
+		t.Fatalf("edit %d %+v", code, i)
+	}
+	if code := call(t, "POST", fmt.Sprintf("%s/api/ideas/%d/accept", ts.URL, i.ID), nil, nil); code != 400 {
+		t.Fatalf("accept new idea should be 400, got %d", code)
+	}
+	st.FinishIdea(i.ID, store.IdeaUpdate{Note: "built"}, store.ActorClaude)
+	if code := call(t, "POST", fmt.Sprintf("%s/api/ideas/%d/reopen", ts.URL, i.ID), map[string]any{"remarks": "toggle is hidden"}, &i); code != 200 || i.Status != "new" {
+		t.Fatalf("reopen %d %+v", code, i)
+	}
+	var list []store.Idea
+	call(t, "GET", ts.URL+"/api/projects/va/ideas?status=new", nil, &list)
+	if len(list) != 1 {
+		t.Fatalf("list %d", len(list))
+	}
+	var d store.IdeaDetail
+	call(t, "GET", fmt.Sprintf("%s/api/ideas/%d", ts.URL, i.ID), nil, &d)
+	if len(d.Events) != 4 {
+		t.Fatalf("events %d", len(d.Events))
+	}
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "sketch.txt")
+	fw.Write([]byte("sketch"))
+	mw.Close()
+	res, err := http.Post(fmt.Sprintf("%s/api/ideas/%d/attachments", ts.URL, i.ID), mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a store.IdeaAttachment
+	json.NewDecoder(res.Body).Decode(&a)
+	res.Body.Close()
+	res, _ = http.Get(fmt.Sprintf("%s/api/idea-attachments/%d", ts.URL, a.ID))
+	b, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if string(b) != "sketch" {
+		t.Fatalf("served %q", b)
+	}
+}

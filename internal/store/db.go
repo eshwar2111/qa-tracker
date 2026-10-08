@@ -103,6 +103,25 @@ CREATE TABLE IF NOT EXISTS attachment (
 	path TEXT NOT NULL,
 	created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS idea (
+	id INTEGER PRIMARY KEY,
+	project_id INTEGER NOT NULL REFERENCES project(id),
+	text TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'new',
+	reopen_count INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS idea_attachment (
+	id INTEGER PRIMARY KEY,
+	idea_id INTEGER NOT NULL REFERENCES idea(id),
+	filename TEXT NOT NULL,
+	mime TEXT NOT NULL,
+	size INTEGER NOT NULL,
+	sha256 TEXT NOT NULL,
+	path TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_event_project ON event(project_id, id);
 CREATE INDEX IF NOT EXISTS idx_event_case ON event(case_id, id);
 CREATE INDEX IF NOT EXISTS idx_case_status ON test_case(project_id, status);
@@ -137,7 +156,44 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return &Store{db: db, AttachDir: filepath.Join(filepath.Dir(abs), "attachments")}, nil
+}
+
+// migrate applies additive changes to databases created by older builds.
+func migrate(db *sql.DB) error {
+	has, err := hasColumn(db, "event", "idea_id")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE event ADD COLUMN idea_id INTEGER REFERENCES idea(id)`); err != nil {
+			return err
+		}
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_event_idea ON event(idea_id, id)`)
+	return err
+}
+
+func hasColumn(db *sql.DB, table, col string) (bool, error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == col {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func (s *Store) Close() error { return s.db.Close() }

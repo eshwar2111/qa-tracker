@@ -211,3 +211,26 @@ Single-page app, hash routing, light/dark via `prefers-color-scheme`.
 ## 13. Initial content
 
 After the tool works, Claude surveys the voice-agent codebase (CLAUDE.md, `internal/*`, docs) and authors `suites/voice-agent.json`: ~80–150 manual cases across areas such as wake word, ASR (whisper/sherpa), barge-in/AEC, TTS, Tier-0 resolver, LLM orchestrator, trust layer/approvals, file index, apps/web/media/system/window tools, Spotify, Google, Microsoft, memory, island UI, config, and robustness/offline. The suite file is committed in the qa-tracker repo and imported with `qa import`.
+
+## 14. Ideas (added 2026-10-08)
+
+The user records free-text feature ideas. Claude picks them up, builds them, and the user verifies the result.
+
+- **Tables:**
+  - `idea(id, project_id, text, status, reopen_count, created_at, updated_at)`. The title is the first line of `text`.
+  - `idea_attachment(id, idea_id, filename, mime, size, sha256, path, created_at)`, using the same content-addressed blob storage as case attachments.
+  - `event.idea_id`, added by migration when an older DB is opened.
+- **Statuses:** `new → in_progress (pick) → done (Claude built it; the user must check) → accepted (user: Works)`.
+  - `new | in_progress → declined` (Claude, reason required).
+  - `done | declined | accepted → new` (user reopen, remarks required, `reopen_count++`).
+  - The text is editable only while `new`. Comments are allowed in any status.
+- **Event kinds:** `idea_created, idea_edited, idea_picked, idea_done, idea_declined, idea_accepted, idea_reopened, idea_comment, idea_attachment`. `idea_done` data includes `note`, plus `commit`, `files` and `cases` (new test-case keys) when given.
+- **API:**
+  - `GET|POST /api/projects/{p}/ideas`, `GET|PUT /api/ideas/{id}`
+  - `POST /api/ideas/{id}/{accept,reopen,comment,attachments}`
+  - `GET /api/idea-attachments/{id}`
+- **CLI:** `qa ideas [--status]` (default new + in_progress, with remarks, comments since the last reopen, attachment paths and Claude's last note); `qa idea show|add|pick|done|decline|comment`.
+- **UI:**
+  - An Ideas tab with a composer (paste or drop attachments, draft kept locally), status filter chips, and a thread view with Works ✓ / Not quite… / Edit / Attach.
+  - A nav badge counting `done` ideas, a dashboard card, and live notices for Claude's idea events.
+- **Workflow rule:** when Claude finishes an idea, it also adds manual test cases for it to the suite and lists their keys in `--cases`.

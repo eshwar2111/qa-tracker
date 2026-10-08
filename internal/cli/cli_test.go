@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -122,5 +123,45 @@ func TestErrorsExitNonZero(t *testing.T) {
 	e.ok("project", "add", "va")
 	if out, code := e.run("claim", "missing.case"); code == 0 || !strings.Contains(out, "not found") {
 		t.Fatalf("claim missing: %d %s", code, out)
+	}
+}
+
+func TestIdeaLoop(t *testing.T) {
+	dir := t.TempDir()
+	e := env{t, filepath.Join(dir, "qa.db")}
+	e.ok("project", "add", "va", "--repo", `E:\Voice Agent`)
+	st, err := store.Open(e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := st.ResolveProject("")
+	i, _ := st.CreateIdea(p.ID, "Show a waveform while listening", store.ActorUser)
+	st.Close()
+
+	var list struct {
+		Count int              `json:"count"`
+		Ideas []store.IdeaWork `json:"ideas"`
+	}
+	json.Unmarshal([]byte(e.ok("ideas")), &list)
+	if list.Count != 1 || list.Ideas[0].Text != "Show a waveform while listening" {
+		t.Fatalf("ideas: %+v", list)
+	}
+	id := strconv.FormatInt(i.ID, 10)
+	e.ok("idea", "pick", id, "--note", "Reuse the level meter")
+	if out, code := e.run("idea", "done", id); code == 0 || !strings.Contains(out, "note") {
+		t.Fatalf("done without note: %d %s", code, out)
+	}
+	e.ok("idea", "done", id, "--note", "Waveform in the island", "--commit", "abc", "--cases", "island.waveform")
+	e.ok("idea", "comment", id, "try", "it", "with", "music", "playing")
+	if out := e.ok("ideas", "--table"); !strings.Contains(out, "0 idea(s)") {
+		t.Fatalf("done idea still listed: %s", out)
+	}
+	var d store.IdeaDetail
+	json.Unmarshal([]byte(e.ok("idea", "show", "#"+id)), &d)
+	if d.Status != "done" || len(d.Events) != 4 {
+		t.Fatalf("detail %+v", d)
+	}
+	if out, code := e.run("idea", "pick", "999"); code == 0 || !strings.Contains(out, "not found") {
+		t.Fatalf("missing idea: %d %s", code, out)
 	}
 }

@@ -128,6 +128,8 @@ type Event struct {
 	CreatedAt  string         `json:"created_at"`
 	CaseKey    string         `json:"case_key,omitempty"`
 	CaseTitle  string         `json:"case_title,omitempty"`
+	IdeaID     *int64         `json:"idea_id,omitempty"`
+	IdeaTitle  string         `json:"idea_title,omitempty"`
 }
 
 type ResultInput struct {
@@ -214,6 +216,7 @@ type Summary struct {
 	Areas       []AreaCount    `json:"areas"`
 	Regressions []Case         `json:"regressions"`
 	Recent      []Event        `json:"recent"`
+	Ideas       map[string]int `json:"ideas"`
 }
 
 type Bug struct {

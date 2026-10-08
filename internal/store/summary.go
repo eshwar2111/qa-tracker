@@ -57,6 +57,9 @@ func (s *Store) Summary(projectID int64) (*Summary, error) {
 	if sum.Recent, err = s.recentEvents(projectID, 30); err != nil {
 		return nil, err
 	}
+	if sum.Ideas, err = s.ideaCounts(projectID); err != nil {
+		return nil, err
+	}
 	return sum, nil
 }
 

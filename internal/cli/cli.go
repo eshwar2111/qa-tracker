@@ -40,6 +40,14 @@ Usage: qa <command> [args] [--db path] [--project key] [--table]
   run list | run show <id> | run close <id>
   summary                                dashboard numbers
 
+  ideas [--status new,in_progress]       the user's ideas to work on (default new + in_progress)
+  idea show <id>                         idea + thread
+  idea add "text"                        record an idea (as Claude)
+  idea pick <id>... [--note "plan"]      start on idea(s)
+  idea done <id> --note "what was built + how to try it" [--commit] [--files] [--cases k1,k2]
+  idea decline <id> --note "why"
+  idea comment <id> "text"
+
 DB: --db › $QA_DB › qa.db next to the executable.
 `
 
@@ -151,6 +159,10 @@ func (c *ctx) dispatch(cmd string, args []string) error {
 		return c.runCmd(args)
 	case "summary":
 		return c.summaryCmd(args)
+	case "ideas":
+		return c.ideasCmd(args)
+	case "idea":
+		return c.ideaCmd(args)
 	}
 	return fmt.Errorf("unknown command %q (try: qa help)", cmd)
 }
@@ -523,4 +535,124 @@ func (c *ctx) summaryCmd(args []string) error {
 	}
 	s.Recent = nil
 	return c.json(s)
+}
+
+func (c *ctx) ideasCmd(args []string) error {
+	fs := c.flags("ideas")
+	status := fs.String("status", "", "comma-separated idea statuses")
+	if _, err := c.setup(fs, args); err != nil {
+		return err
+	}
+	defer c.st.Close()
+	p, err := c.proj()
+	if err != nil {
+		return err
+	}
+	ideas, err := c.st.IdeasToWork(p.ID, splitCSV(*status))
+	if err != nil {
+		return err
+	}
+	if c.table {
+		for _, i := range ideas {
+			fmt.Fprintf(c.out, "#%d [%s] reopened×%d\n  %s\n", i.ID, i.Status, i.ReopenCount, strings.ReplaceAll(i.Text, "\n", "\n  "))
+			if i.Remarks != "" {
+				fmt.Fprintf(c.out, "  sent back: %s\n", i.Remarks)
+			}
+			fmt.Fprintln(c.out)
+		}
+		fmt.Fprintf(c.out, "%d idea(s)\n", len(ideas))
+		return nil
+	}
+	return c.json(map[string]any{"project": p.Key, "repo_path": p.RepoPath, "count": len(ideas), "ideas": ideas})
+}
+
+func (c *ctx) ideaCmd(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: qa idea show|add|pick|done|decline|comment ...")
+	}
+	sub := args[0]
+	fs := c.flags("idea " + sub)
+	note := fs.String("note", "", "plan / what was built / reason")
+	commit := fs.String("commit", "", "commit hash")
+	files := fs.String("files", "", "comma-separated changed files")
+	cases := fs.String("cases", "", "comma-separated test-case keys added for this idea")
+	pos, err := c.setup(fs, args[1:])
+	if err != nil {
+		return err
+	}
+	defer c.st.Close()
+	p, err := c.proj()
+	if err != nil {
+		return err
+	}
+	upd := store.IdeaUpdate{Note: *note, Commit: *commit, Files: splitCSV(*files), Cases: splitCSV(*cases)}
+	each := func(fn func(id int64) (*store.Idea, error)) error {
+		if len(pos) == 0 {
+			return fmt.Errorf("usage: qa idea %s <id>...", sub)
+		}
+		var rows []map[string]any
+		failed := 0
+		for _, ref := range pos {
+			i, err := c.st.ResolveIdea(p.ID, ref)
+			if err == nil {
+				i, err = fn(i.ID)
+			}
+			if err != nil {
+				failed++
+				rows = append(rows, map[string]any{"ref": ref, "error": err.Error()})
+				continue
+			}
+			rows = append(rows, map[string]any{"ref": ref, "id": i.ID, "title": i.Title, "status": i.Status})
+		}
+		if err := c.json(rows); err != nil {
+			return err
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d of %d failed", failed, len(pos))
+		}
+		return nil
+	}
+	switch sub {
+	case "show":
+		if len(pos) != 1 {
+			return errors.New("usage: qa idea show <id>")
+		}
+		i, err := c.st.ResolveIdea(p.ID, pos[0])
+		if err != nil {
+			return err
+		}
+		d, err := c.st.IdeaDetail(i.ID)
+		if err != nil {
+			return err
+		}
+		return c.json(d)
+	case "add":
+		if len(pos) == 0 {
+			return errors.New(`usage: qa idea add "text"`)
+		}
+		i, err := c.st.CreateIdea(p.ID, strings.Join(pos, " "), store.ActorClaude)
+		if err != nil {
+			return err
+		}
+		return c.json(i)
+	case "pick":
+		return each(func(id int64) (*store.Idea, error) { return c.st.PickIdea(id, upd, store.ActorClaude) })
+	case "done":
+		return each(func(id int64) (*store.Idea, error) { return c.st.FinishIdea(id, upd, store.ActorClaude) })
+	case "decline":
+		return each(func(id int64) (*store.Idea, error) { return c.st.DeclineIdea(id, upd, store.ActorClaude) })
+	case "comment":
+		if len(pos) < 2 {
+			return errors.New(`usage: qa idea comment <id> "text"`)
+		}
+		text := strings.Join(pos[1:], " ")
+		pos = pos[:1]
+		return each(func(id int64) (*store.Idea, error) {
+			if err := c.st.CommentIdea(id, text, store.ActorClaude); err != nil {
+				return nil, err
+			}
+			return c.st.GetIdea(id)
+		})
+	}
+	return fmt.Errorf("unknown idea subcommand %q", sub)
 }
