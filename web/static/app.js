@@ -106,7 +106,7 @@ async function viewDashboard() {
   const { summary: s } = await api(`/projects/${P()}/summary`);
   const tile = (st, n, label, href) => `<a class="tile ${st}" href="${href}"><div class="n">${n}</div><div class="l">${label}</div></a>`;
   const statuses = ['untested', 'pass', 'fail', 'blocked', 'in_fix', 'fixed'];
-  const sev = ['critical', 'major', 'minor', 'trivial', 'unset'].filter(k => s.open_by_severity[k]);
+  const sev = ['critical', 'major', 'minor', 'trivial', 'blocked', 'unset'].filter(k => s.open_by_severity[k]);
   const passRate = s.total ? Math.round(100 * s.by_status.pass / s.total) : 0;
 
   app.innerHTML = `

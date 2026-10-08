@@ -35,6 +35,9 @@ func (s *Store) Summary(projectID int64) (*Summary, error) {
 			sev := c.Severity
 			if sev == "" {
 				sev = "unset"
+				if c.Status == StatusBlocked {
+					sev = "blocked"
+				}
 			}
 			sum.BySeverity[sev]++
 		}

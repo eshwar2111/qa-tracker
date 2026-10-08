@@ -1,66 +1,206 @@
 # qa-tracker
 
-A local test-case and bug-fix-loop tracker. You run test cases by hand in the web UI; Claude reads failures from the same SQLite database, fixes the code, and records each fix. Everything is stored in `qa.db`, and none of it is static HTML.
+**A local, single-binary tracker for manual testing, built so a human tester and an AI coding agent can share one bug-fix loop.**
 
-## Run it
+You run test cases by hand in a fast, keyboard-driven web UI and write down what went wrong. The coding agent ([Claude Code](https://claude.com/claude-code) here, or anything that can run a CLI) reads your failures from the same SQLite database, fixes the code, and records what it changed. You retest only what was fixed. Feature ideas follow the same loop.
 
-```
-start.cmd                      # or: qa.exe serve   → http://127.0.0.1:7777
-```
+![Dashboard](docs/screenshots/dashboard.png)
+
+- **One binary, no setup.** Go and pure-Go SQLite: no CGO, no Node, no Docker. `qa serve` and you're testing.
+- **Built for the test → fix → retest loop.** Each failure carries your remarks, severity, screenshots and logs. Each fix carries a note on what changed and what to retest, plus the commit and files.
+- **Regressions are flagged.** A case that fails again after a fix is reopened, counted and highlighted.
+- **Nothing is lost.** Every result, fix, comment and test-case edit goes on an append-only timeline, and old versions of test cases are kept.
+- **Test cases live in your repo as JSON.** Import them by stable key; editing a case's steps automatically sends it back for retest.
+
+---
+
+## Contents
+
+- [The loop](#the-loop)
+- [Screenshots](#screenshots)
+- [Quick start](#quick-start)
+- [Writing test cases](#writing-test-cases)
+- [Ideas](#ideas)
+- [CLI reference](#cli-reference)
+- [How it works](#how-it-works)
+- [Development](#development)
 
 ## The loop
 
-1. **Test.** Go to **Runs**, start a run with the build or commit you're testing, and work through the cases with the keyboard:
-   - `P` pass, `F` fail, `B` blocked, `S` skip, `J`/`K` next and previous, `?` help.
-   - `F` opens a remarks drawer. Type what happened and choose a severity. Paste screenshots with Ctrl+V, or drop log files in. Submit with Ctrl+Enter.
-   - Unsent remarks are kept as a draft if you close the drawer.
-2. **Ask Claude to "pick up the bugs".** Claude runs `qa bugs`, which returns each failing case with its steps, your remarks, attachment paths, comments and any earlier fix. Claude claims each bug, fixes it in the repo, then runs `qa fixed <id> --note "…" --commit <sha>`.
-3. **Retest.** The UI shows a toast when Claude finishes. Start a new run: the default filter, **Claude's fixes to retest**, includes only the fixed cases. Each one shows Claude's note on what changed and what to check.
-   - Pass closes the case.
-   - Fail reopens it, increases its reopen count and flags it as a **regression** on the dashboard.
+```
+          ┌──────────────── you (web UI) ────────────────┐      ┌──────── agent (CLI) ────────┐
+ suite ──▶│ run cases → Pass / Fail + remarks + screenshots│ ──▶ │ qa bugs → claim → fix code  │
+ .json    │                                               │      │ qa fixed --note --commit    │
+          │ retest run (only fixed cases, with fix notes) │ ◀── │                             │
+          │   pass → closed     fail → reopened/regression│      └─────────────────────────────┘
+          └───────────────────────────────────────────────┘
+```
 
-Every action appears on the case's timeline, so you can see who did what, in which run and build, and which commit.
+| Case status | Meaning |
+|---|---|
+| `untested` | new, or its steps changed since the last run |
+| `pass` | works |
+| `fail` / `blocked` | open bug, with your remarks |
+| `in_fix` | the agent is working on it |
+| `fixed` | the agent says it's fixed; **needs your retest** |
+
+A new run picks **"fixed"** cases by default, so after a round of fixes you retest exactly those.
+
+## Screenshots
+
+**Run player:** one case at a time. `P` pass, `F` fail, `B` blocked, `S` skip, `J`/`K` to move. Fixed cases show the agent's note on what to retest.
+
+![Run player](docs/screenshots/run-player.png)
+
+**Case timeline:** your report, the agent's claim and fix (with commit and files), attachments, and comments both ways.
+
+![Case timeline](docs/screenshots/case-timeline.png)
+
+**Ideas:** write a feature idea freely; the agent builds it and you confirm it works.
+
+![Ideas](docs/screenshots/ideas.png)
+![Idea detail](docs/screenshots/idea-detail.png)
+
+## Quick start
+
+Requires Go 1.26+.
+
+```bash
+git clone https://github.com/eshwar2111/qa-tracker.git
+cd qa-tracker
+go build -ldflags="-s -w" -o qa.exe ./cmd/qa      # use -o qa on macOS/Linux
+
+./qa.exe project add my-app --name "My App" --repo /path/to/my-app
+./qa.exe import suites/voice-agent.json          # or your own suite (see below)
+./qa.exe serve                                   # → http://127.0.0.1:7777
+```
+
+On Windows, `start.cmd` starts the server and opens the browser.
+
+**Testing:**
+1. Go to **Runs → Start run**, enter the build or commit you're testing, and choose which cases to include.
+2. Work through the cases with the keyboard.
+3. When you fail a case, a drawer opens. Write what you saw, choose a severity, and paste a screenshot (Ctrl+V) or drop in a log file. Submit with Ctrl+Enter. Drafts survive closing the drawer.
+
+**Fixing:** tell your agent to *"pick up the bugs"*. It runs `qa bugs`, fixes each one, and records the fix with `qa fixed`. The UI checks for changes every 3 seconds and shows a notice when fixes land.
+
+**Retesting:** start a new run. It contains only the fixed cases, each with the fix note above its steps.
+
+> The server binds to `127.0.0.1` only. It is a local, single-user tool with no authentication.
+
+## Writing test cases
+
+Test cases are JSON files kept in version control, usually under `suites/`:
+
+```json
+{
+  "project": "my-app",
+  "areas": [{ "key": "auth", "name": "Sign-in", "order": 1 }],
+  "cases": [{
+    "key": "auth.login.happy-path",
+    "area": "auth",
+    "title": "Sign in with a valid password",
+    "priority": "P0",
+    "tags": ["smoke"],
+    "preconditions": "A user exists: demo@example.com / hunter2",
+    "steps": ["Open /login", "Enter the credentials", "Press Sign in"],
+    "expected": "Dashboard loads within 2 s and shows 'Hi, Demo'"
+  }]
+}
+```
+
+`qa import suites/my-app.json` adds or updates cases, matching them by `key`:
+
+| What changed | Effect |
+|---|---|
+| a new key | case created as `untested` |
+| `steps`, `expected` or `preconditions` | **new version**; the old one is kept and the case returns to `untested` |
+| only `title`, `priority`, `tags` or `area` | updated in place; status kept |
+| key missing from the file + `--archive-missing` | archived |
+
+The whole import is checked before anything is written. An unknown area, a bad priority or a duplicate key rejects the file, and the error lists every offending key.
 
 ## Ideas
 
-Open the **Ideas** tab and type any feature idea freely. The first line becomes the title. Press Ctrl+Enter to add it, and paste sketches or screenshots if useful.
+The **Ideas** tab is a free-text inbox for feature ideas. Type an idea and press Ctrl+Enter; the first line becomes the title, and you can paste sketches or screenshots.
 
-When you tell Claude to **"pick up my new ideas"**:
-1. Claude runs `qa ideas`, picks each idea, builds it, and adds test cases for it.
-2. Claude marks it **Built — check it** with a note on how to try it.
-3. You click **Works ✓**, or **Not quite…** with remarks, which sends it back.
-4. Claude can also decline an idea with a reason, and you can reopen it.
+```
+new ──pick──▶ in_progress ──done──▶ done ──"Works ✓"──▶ accepted
+ ▲                 │                  │
+ └── "Not quite…" ─┴──── declined ◀───┘   (reopening needs your remarks)
+```
 
-The Ideas tab shows a badge counting ideas that are waiting for you to check.
+Tell your agent to *"pick up my new ideas"*:
+1. It runs `qa ideas` and builds each idea.
+2. It adds test cases for the new behaviour.
+3. It marks the idea `done` with notes on how to try it.
 
-## CLI (for Claude)
+A nav badge counts ideas waiting for you to check.
 
-Run `qa help` for the full list. All output is JSON unless you add `--table`.
+## CLI reference
+
+All commands print JSON (easy for agents to parse) unless you add `--table`. Flags can come before or after positional arguments.
 
 | Command | Purpose |
 |---|---|
-| `qa bugs [--area x]` | open bugs, worst first |
-| `qa claim <id\|key>...` | mark as being fixed |
-| `qa fixed <id\|key>... --note … [--commit] [--files]` | send back for retest |
-| `qa comment <id\|key> "text"` | add context to the timeline |
-| `qa case show <id\|key>` | full case + timeline |
-| `qa import suites/voice-agent.json [--archive-missing]` | add/update cases by key |
-| `qa export --out file.json` | dump current cases |
-| `qa list --status fail,blocked --table` | filtered list |
-| `qa run new / list / show / close` | runs |
-| `qa ideas` | new + in-progress ideas with remarks and attachments |
-| `qa idea pick\|done\|decline <id> --note … [--commit] [--cases]` | move an idea along |
-| `qa idea comment <id> "text"` / `qa idea show <id>` | thread |
+| `qa serve [--addr 127.0.0.1:7777]` | web UI + REST API |
+| `qa project add <key> [--name] [--repo]` / `project list` | projects |
+| `qa import <file.json> [--archive-missing]` / `qa export [--out f]` | sync test cases |
+| `qa list [--status s1,s2] [--area] [--priority] [--q]` | find cases |
+| `qa bugs [--status] [--area]` | open bugs, worst first, with remarks, attachments, comments and last fix |
+| `qa case show <id\|key>` | a case + full timeline |
+| `qa claim <id\|key>...` | mark bugs as being fixed |
+| `qa fixed <id\|key>... --note "…" [--commit] [--files a,b]` | send back for retest |
+| `qa comment <id\|key> "text"` | add context |
+| `qa run new [--build] [--filter fixed\|needs-retest\|open\|all\|area:x\|priority:P0]` | start a run |
+| `qa run list` / `run show <id>` / `run close <id>` | runs |
+| `qa ideas [--status]` | ideas to work on |
+| `qa idea show\|add\|pick\|done\|decline\|comment …` | move an idea along |
+| `qa summary` | dashboard numbers |
 
-**Editing test cases:** edit `suites/<project>.json`, then run `qa import`. Cases are matched by `key`.
-- If the steps, expected result or preconditions change, the case gets a new version (the old one is kept) and goes back to **untested**.
-- If only the title, priority, tags or area change, its status stays the same.
+**Database location:** the `--db` flag, then the `QA_DB` environment variable, then `qa.db` next to the binary. Attachments go in `attachments/` beside the database.
 
-## Build & test
+### Using it with an AI agent
+
+[`CLAUDE.md`](CLAUDE.md) holds the steps a coding agent follows for *"pick up the bugs"* and *"pick up my new ideas"*. In short:
+
+1. Read with `qa bugs` or `qa ideas`.
+2. `claim` or `pick` before starting.
+3. Fix or build, and commit.
+4. Record it with `qa fixed` or `qa idea done`, plus a concrete note on how to verify.
+
+Any agent that can run shell commands can follow the same steps.
+
+## How it works
 
 ```
-go test ./...
+cmd/qa/            single binary: `serve` or a CLI subcommand
+internal/store/    every business rule, and the only package that writes SQL
+                   (status machine, import/versioning, runs, events, attachments)
+internal/server/   thin JSON REST API + embedded UI
+internal/cli/      thin CLI over the store (actor = agent)
+web/static/        vanilla HTML/CSS/JS SPA, embedded with go:embed, no build step
+suites/            test-case JSON (the example suite covers a Windows voice agent)
+```
+
+- **SQLite in WAL mode**, with `busy_timeout` and immediate transactions. The UI server and the CLI can write to the same file at the same time.
+- **An append-only `event` table** is both the history of every case and idea and the cursor the UI polls (`GET /api/events?since=<id>`) for live updates.
+- **Attachments are content-addressed** (`attachments/<sha256>.<ext>`), limited to 20 MB, and served with `nosniff`. Uploaded text and HTML is always served as plain text.
+- **Older databases upgrade automatically** when opened.
+
+The full design is in [`docs/superpowers/specs/`](docs/superpowers/specs/2026-10-08-qa-tracker-design.md).
+
+## Development
+
+```bash
+go test ./...                                 # store, HTTP and end-to-end CLI tests
+go vet ./...
 go build -ldflags="-s -w" -o qa.exe ./cmd/qa
 ```
 
-The SQLite driver is pure Go (`modernc.org/sqlite`), so no CGO is needed. The database is found in this order: the `--db` flag, then the `QA_DB` environment variable, then `qa.db` next to `qa.exe`. Attachments are stored in `attachments/` next to the database.
+- The UI is plain JavaScript in `web/static/`. Edit it, rebuild, and reload; there's no bundler.
+- On Windows, stop a running `qa.exe serve` before rebuilding, because the binary is locked while it runs.
+
+## License
+
+[MIT](LICENSE)
