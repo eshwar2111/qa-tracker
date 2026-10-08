@@ -10,6 +10,8 @@ import (
 // runFilter converts a spec §6 filter string into a CaseFilter.
 func runFilter(filter string) (CaseFilter, error) {
 	switch {
+	case filter == "fixed":
+		return CaseFilter{Statuses: []string{StatusFixed}}, nil
 	case filter == "needs-retest":
 		return CaseFilter{Statuses: RetestStatuses}, nil
 	case filter == "open":
@@ -25,16 +27,23 @@ func runFilter(filter string) (CaseFilter, error) {
 		}
 		return CaseFilter{Priority: p}, nil
 	}
-	return CaseFilter{}, fmt.Errorf("%w: filter %q must be needs-retest, open, all, area:<key> or priority:<P0-P3>", ErrValidation, filter)
+	return CaseFilter{}, fmt.Errorf("%w: filter %q must be fixed, needs-retest, open, all, area:<key> or priority:<P0-P3>", ErrValidation, filter)
 }
 
 // CreateRun snapshots the cases matching filter into a new run. An empty
-// filter means needs-retest when anything needs retest, else all.
+// filter picks the first non-empty of: fixed (Claude's fixes awaiting retest),
+// needs-retest, all.
 func (s *Store) CreateRun(projectID int64, name, build, filter string, actor Actor) (*Run, error) {
 	if filter == "" {
-		filter = "needs-retest"
-		if n, _ := s.ListCases(projectID, CaseFilter{Statuses: RetestStatuses}); len(n) == 0 {
-			filter = "all"
+		filter = "all"
+		for _, f := range []struct {
+			name     string
+			statuses []string
+		}{{"fixed", []string{StatusFixed}}, {"needs-retest", RetestStatuses}} {
+			if n, _ := s.ListCases(projectID, CaseFilter{Statuses: f.statuses}); len(n) > 0 {
+				filter = f.name
+				break
+			}
 		}
 	}
 	cf, err := runFilter(filter)

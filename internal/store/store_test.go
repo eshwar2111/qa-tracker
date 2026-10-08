@@ -445,6 +445,14 @@ func TestRunFilters(t *testing.T) {
 	if _, err := s.CreateRun(p.ID, "", "", "bogus", ActorUser); !errors.Is(err, ErrValidation) {
 		t.Fatalf("bogus filter: %v", err)
 	}
+	// A pending fix wins the default over untested cases.
+	must[*Case](t)(s.MarkFixed(noise.ID, FixInput{Note: "n"}, ActorClaude))
+	if r := must[*Run](t)(s.CreateRun(p.ID, "", "", "", ActorUser)); r.Filter != "fixed" || r.Progress.Total != 1 {
+		t.Fatalf("default with pending fix %+v", r)
+	}
+	if r := must[*Run](t)(s.CreateRun(p.ID, "", "", "fixed", ActorUser)); r.Progress.Total != 1 {
+		t.Fatalf("fixed filter %+v", r)
+	}
 	// Everything resolved → default picks all.
 	must[*Case](t)(s.RecordResult(noise.ID, ResultInput{Result: ResultPass}, ActorUser))
 	must[*Case](t)(s.RecordResult(idle.ID, ResultInput{Result: ResultPass}, ActorUser))

@@ -17,7 +17,8 @@ func (s *Store) CreateProject(key, name, repo string) (*Project, error) {
 	}
 	var p *Project
 	err := s.tx(func(tx *sql.Tx) error {
-		res, err := tx.Exec(`INSERT INTO project(key, name, repo_path, created_at) VALUES (?,?,?,?)`, key, name, repo, now())
+		t := now()
+		res, err := tx.Exec(`INSERT INTO project(key, name, repo_path, created_at) VALUES (?,?,?,?)`, key, name, repo, t)
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE") {
 				return fmt.Errorf("%w: project %q already exists", ErrValidation, key)
@@ -25,7 +26,7 @@ func (s *Store) CreateProject(key, name, repo string) (*Project, error) {
 			return err
 		}
 		id, _ := res.LastInsertId()
-		p = &Project{ID: id, Key: key, Name: name, RepoPath: repo}
+		p = &Project{ID: id, Key: key, Name: name, RepoPath: repo, CreatedAt: t}
 		_, err = addEvent(tx, eventSpec{projectID: id, actor: ActorClaude, kind: "project_created", data: map[string]any{"key": key}})
 		return err
 	})

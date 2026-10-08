@@ -117,7 +117,7 @@ A case whose `reopen_count ≥ 1` is shown with a **regression** badge.
 
 ## 6. Runs
 
-- `run new --build <label> [--name] [--filter needs-retest|open|all|area:<key>|priority:<P..>]` snapshots the matching non-archived cases into `run_case` (with their current `version`). Default filter: `needs-retest` if any exist, else `all`.
+- `run new --build <label> [--name] [--filter fixed|needs-retest|open|all|area:<key>|priority:<P..>]` snapshots the matching non-archived cases into `run_case` (with their current `version`). Default filter: `fixed` (Claude's fixes awaiting retest) if any exist, else `needs-retest` if any exist, else `all`.
 - Recording a result writes `run_case` **and** updates `test_case.status` via the §5 rules.
 - Re-recording a result in the same run overwrites `run_case` and appends a new event (history is never lost).
 - A run is "complete" when every `run_case.result` is non-null; closing is manual (`run close`), and closed runs are read-only.

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QA Tracker</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/">QA Tracker</a>
+  <nav>
+    <a href="#/" data-nav="dash">Dashboard</a>
+    <a href="#/cases" data-nav="cases">Cases</a>
+    <a href="#/runs" data-nav="runs">Runs</a>
+  </nav>
+  <div class="spacer"></div>
+  <span id="live" class="live" title="Live updates">●</span>
+  <select id="project" aria-label="Project"></select>
+</header>
+<main id="app"><p class="muted pad">Loading…</p></main>
+
+<div id="drawer" class="drawer" hidden>
+  <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <h2 id="drawer-title">Report failure</h2>
+    <p id="drawer-case" class="muted"></p>
+    <label for="remarks">What happened? <span class="muted">(Ctrl+Enter to submit)</span></label>
+    <textarea id="remarks" rows="7" placeholder="What did you see vs. what was expected? Exact text on screen, timing, anything odd…"></textarea>
+    <div class="row">
+      <label for="severity">Severity</label>
+      <select id="severity">
+        <option value="critical">Critical — crash / data loss / core loop broken</option>
+        <option value="major" selected>Major — feature doesn't work</option>
+        <option value="minor">Minor — works, but wrong/slow/ugly</option>
+        <option value="trivial">Trivial — cosmetic</option>
+      </select>
+    </div>
+    <div id="drop" class="drop" tabindex="0">Paste a screenshot (Ctrl+V) or drop files / logs here</div>
+    <ul id="pending-files" class="files"></ul>
+    <div class="row end">
+      <button id="drawer-cancel" class="btn">Cancel <kbd>Esc</kbd></button>
+      <button id="drawer-submit" class="btn danger">Submit</button>
+    </div>
+  </div>
+</div>
+
+<div id="help" class="drawer" hidden>
+  <div class="drawer-panel narrow">
+    <h2>Keyboard shortcuts</h2>
+    <table class="keys">
+      <tr><td><kbd>J</kbd> / <kbd>K</kbd></td><td>Next / previous case</td></tr>
+      <tr><td><kbd>P</kbd></td><td>Pass</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Fail (opens remarks)</td></tr>
+      <tr><td><kbd>B</kbd></td><td>Blocked (opens remarks)</td></tr>
+      <tr><td><kbd>S</kbd></td><td>Skip</td></tr>
+      <tr><td><kbd>N</kbd></td><td>Jump to next case without a result</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Submit remarks</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Close dialog</td></tr>
+      <tr><td><kbd>?</kbd></td><td>This help</td></tr>
+    </table>
+    <div class="row end"><button class="btn" id="help-close">Close</button></div>
+  </div>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

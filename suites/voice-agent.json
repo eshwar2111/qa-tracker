@@ -1,0 +1,2231 @@
+{
+  "project": "voice-agent",
+  "areas": [
+    {
+      "key": "setup",
+      "name": "Build, config & startup",
+      "order": 1
+    },
+    {
+      "key": "wakeword",
+      "name": "Wake word",
+      "order": 2
+    },
+    {
+      "key": "asr",
+      "name": "Speech recognition",
+      "order": 3
+    },
+    {
+      "key": "tts",
+      "name": "Text-to-speech",
+      "order": 4
+    },
+    {
+      "key": "bargein",
+      "name": "Barge-in & cancellation",
+      "order": 5
+    },
+    {
+      "key": "resolver",
+      "name": "Tier-0 local resolver",
+      "order": 6
+    },
+    {
+      "key": "orchestrator",
+      "name": "Tier-1 LLM planning & vision",
+      "order": 7
+    },
+    {
+      "key": "trust",
+      "name": "Trust layer (approval, recovery)",
+      "order": 8
+    },
+    {
+      "key": "fileindex",
+      "name": "File-intelligence index",
+      "order": 9
+    },
+    {
+      "key": "apps",
+      "name": "App launch & close",
+      "order": 10
+    },
+    {
+      "key": "web",
+      "name": "Web search & research",
+      "order": 11
+    },
+    {
+      "key": "media",
+      "name": "Media control",
+      "order": 12
+    },
+    {
+      "key": "system",
+      "name": "System control & status",
+      "order": 13
+    },
+    {
+      "key": "window",
+      "name": "Window control",
+      "order": 14
+    },
+    {
+      "key": "productivity",
+      "name": "Timers, todos, notes, reminders, calc",
+      "order": 15
+    },
+    {
+      "key": "spotify",
+      "name": "Spotify integration",
+      "order": 16
+    },
+    {
+      "key": "google",
+      "name": "Google Workspace integration",
+      "order": 17
+    },
+    {
+      "key": "microsoft",
+      "name": "Microsoft 365 integration",
+      "order": 18
+    },
+    {
+      "key": "memory",
+      "name": "Memory & session context",
+      "order": 19
+    },
+    {
+      "key": "island",
+      "name": "Dynamic Island overlay UI",
+      "order": 20
+    },
+    {
+      "key": "robustness",
+      "name": "Robustness & failure modes",
+      "order": 21
+    }
+  ],
+  "cases": [
+    {
+      "key": "setup.build.voice-full",
+      "area": "setup",
+      "title": "Build full voice stack binary",
+      "priority": "P0",
+      "tags": [
+        "build"
+      ],
+      "preconditions": "MinGW-w64 GCC on PATH (go env CC); whisper static libs, sherpa runtime DLLs, Kokoro + streaming models set up per docs/BUILD-VOICE.md",
+      "steps": [
+        "In a terminal at the project root run: go build -tags \"sherpa whisper sqlite_fts5\" -ldflags=\"-s -w -H windowsgui\" -o voice-agent.exe ./cmd/app",
+        "Check that voice-agent.exe exists"
+      ],
+      "expected": "Build completes with no errors (no 'undefined reference to std::' link errors); voice-agent.exe is produced."
+    },
+    {
+      "key": "setup.build.no-whisper-tag",
+      "area": "setup",
+      "title": "Build without whisper tag fails voice gracefully",
+      "priority": "P2",
+      "tags": [
+        "build",
+        "voice",
+        "negative"
+      ],
+      "preconditions": "Binary built with only -tags sqlite_fts5",
+      "steps": [
+        "Launch voice-agent.exe",
+        "Click the idle island pill to start listening",
+        "Say: open notepad",
+        "Open voice-agent.log"
+      ],
+      "expected": "Island shows \"Listening…\" then an error such as \"Sorry — that didn't work. Try saying it a different way?\"; Notepad does NOT open; voice-agent.log contains 'voice not available: build with -tags whisper'. Typed commands (Ctrl+Space) still work."
+    },
+    {
+      "key": "setup.firstrun.default-config",
+      "area": "setup",
+      "title": "First run creates default config.json",
+      "priority": "P0",
+      "tags": [
+        "config",
+        "firstrun"
+      ],
+      "preconditions": "Fresh folder with voice-agent.exe and models but NO config.json",
+      "steps": [
+        "Launch voice-agent.exe",
+        "Wait 10 s",
+        "Open the newly created config.json in Notepad"
+      ],
+      "expected": "config.json is created containing llm_provider \"gemini\", model \"gemini-2.5-flash\", empty api_key, enable_voice true, speak_responses true, wake_word \"hey jarvis\", wake_word_enabled true, telemetry \"off\", activity_capture true. App starts and island shows \"Ready\"."
+    },
+    {
+      "key": "setup.startup.island-appears",
+      "area": "setup",
+      "title": "Startup shows idle island at top center",
+      "priority": "P0",
+      "tags": [
+        "startup",
+        "ui"
+      ],
+      "preconditions": "Valid config.json",
+      "steps": [
+        "Launch voice-agent.exe",
+        "Observe the top center of the primary monitor",
+        "Wait 6 seconds without interacting"
+      ],
+      "expected": "Within ~5 s the island appears at the top center showing \"Ready\" with a mic icon and gear button; no taskbar button appears; after ~6 s idle it shrinks to a small, 50%-opacity dormant pill."
+    },
+    {
+      "key": "setup.config.trusted-default",
+      "area": "setup",
+      "title": "trusted_execution defaults on when key absent",
+      "priority": "P1",
+      "tags": [
+        "config",
+        "trust"
+      ],
+      "preconditions": "config.json with the trusted_execution key removed",
+      "steps": [
+        "Restart the app",
+        "Open command sheet (Ctrl+Space), type: delete file test-qa.txt (create Desktop\\test-qa.txt first)",
+        "Press Enter"
+      ],
+      "expected": "An approval card appears (\"Review action request\", step marked \"⚠ Risky\") before anything is deleted, proving the trust layer is on by default."
+    },
+    {
+      "key": "setup.config.provider-switch",
+      "area": "setup",
+      "title": "Switch LLM provider in Control Center",
+      "priority": "P1",
+      "tags": [
+        "config",
+        "ui",
+        "llm"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); a valid OpenAI or Anthropic key available",
+      "steps": [
+        "Click the gear on the island to open Control Center",
+        "Go to the Models tab",
+        "Change provider to openai (or anthropic), enter key and model",
+        "Click Save",
+        "Ctrl+Space, type: write a two-line poem about rain, Enter"
+      ],
+      "expected": "Toast \"Saved — provider switched to openai\" appears; config.json updated; the poem request is answered (answer card) by the new provider without restarting."
+    },
+    {
+      "key": "setup.startup.missing-wake-model",
+      "area": "setup",
+      "title": "Missing wake model degrades gracefully",
+      "priority": "P2",
+      "tags": [
+        "startup",
+        "wakeword",
+        "negative"
+      ],
+      "preconditions": "Temporarily rename the models/wakeword folder",
+      "steps": [
+        "Launch the app",
+        "Say: hey jarvis",
+        "Click the island pill and say: what time is it"
+      ],
+      "expected": "App still starts; wake word does nothing; log contains 'wake word unavailable: openWakeWord model missing ... (wake word off; pill + typing still work)'; click-to-talk still answers the time. Restore the folder afterwards."
+    },
+    {
+      "key": "wakeword.default.hey-jarvis",
+      "area": "wakeword",
+      "title": "Wake with 'Hey Jarvis'",
+      "priority": "P0",
+      "tags": [
+        "voice",
+        "wake"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "From ~1 m away at normal volume say: Hey Jarvis",
+        "Wait 1 second"
+      ],
+      "expected": "Within ~1 s island switches to \"Listening…\" with blue pulsing mic and a level meter that moves with your voice. (No chime is expected.)"
+    },
+    {
+      "key": "wakeword.gapless.one-breath",
+      "area": "wakeword",
+      "title": "Wake word and command in one breath",
+      "priority": "P0",
+      "tags": [
+        "voice",
+        "wake"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Without pausing say: Hey Jarvis open Notepad"
+      ],
+      "expected": "Notepad opens within ~2 s of finishing the sentence; the command is not cut off and the word 'Jarvis' is not treated as part of the app name."
+    },
+    {
+      "key": "wakeword.recall.ten-tries",
+      "area": "wakeword",
+      "title": "Wake recall over 10 attempts",
+      "priority": "P1",
+      "tags": [
+        "voice",
+        "wake",
+        "benchmark"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say \"Hey Jarvis\" 10 times, waiting for the island to return to idle each time (say \"never mind\" or wait out the listen)",
+        "Count how many times the island entered Listening"
+      ],
+      "expected": "At least 9 of 10 attempts trigger Listening (target recall ≥95%)."
+    },
+    {
+      "key": "wakeword.false.tv-speech",
+      "area": "wakeword",
+      "title": "No false wake from background speech",
+      "priority": "P1",
+      "tags": [
+        "voice",
+        "wake",
+        "negative"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Play a podcast or TV news clip near the mic for 10 minutes",
+        "Do not say the wake word",
+        "Count island Listening activations"
+      ],
+      "expected": "Zero or at most one false activation in 10 minutes (target ≤0.2 false wakes/hour)."
+    },
+    {
+      "key": "wakeword.false.similar-words",
+      "area": "wakeword",
+      "title": "Similar-sounding phrases do not wake",
+      "priority": "P2",
+      "tags": [
+        "voice",
+        "wake",
+        "negative"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say each phrase once, pausing 3 s: \"hey Travis\", \"Jarvis Cocker\", \"hey Charles\", \"service\""
+      ],
+      "expected": "Island does not enter Listening for any of these (log may show 'NEAR MISS' lines; that is fine)."
+    },
+    {
+      "key": "wakeword.disabled.config",
+      "area": "wakeword",
+      "title": "wake_word_enabled=false disables wake",
+      "priority": "P1",
+      "tags": [
+        "voice",
+        "wake",
+        "config"
+      ],
+      "preconditions": "config.json \"wake_word_enabled\": false; app restarted",
+      "steps": [
+        "Say: Hey Jarvis open notepad",
+        "Click the island pill, then say: open notepad"
+      ],
+      "expected": "Wake phrase is ignored; clicking the pill starts listening and Notepad opens."
+    },
+    {
+      "key": "asr.quiet.basic-transcribe",
+      "area": "asr",
+      "title": "Basic transcription in quiet room",
+      "priority": "P0",
+      "tags": [
+        "voice",
+        "asr"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis",
+        "When Listening, say: what time is it"
+      ],
+      "expected": "Island goes Listening → Thinking… → shows the current local time (e.g. \"It's 3:42 PM\") within ~2 s of stopping speaking; answer is spoken aloud."
+    },
+    {
+      "key": "asr.endpoint.trailing-silence",
+      "area": "asr",
+      "title": "Turn ends shortly after you stop speaking",
+      "priority": "P0",
+      "tags": [
+        "voice",
+        "asr",
+        "latency"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis open calculator",
+        "Stop speaking and time how long until Calculator appears"
+      ],
+      "expected": "Listening ends ~0.7–1 s after you stop (streaming build; ~2 s on whisper-only build) and Calculator opens within ~2 s of end of speech."
+    },
+    {
+      "key": "asr.punctuation.open-notepad",
+      "area": "asr",
+      "title": "Punctuated transcript still routes locally",
+      "priority": "P1",
+      "tags": [
+        "voice",
+        "asr",
+        "resolver"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say crisply with pauses: Hey Jarvis... Open... Notepad."
+      ],
+      "expected": "Notepad opens via the local path (no Thinking delay > ~1 s); log shows a Tier-0 match, not a cloud plan."
+    },
+    {
+      "key": "asr.nospeech.reprompt",
+      "area": "asr",
+      "title": "Silence after wake reprompts twice then idles",
+      "priority": "P0",
+      "tags": [
+        "voice",
+        "asr",
+        "ux"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis",
+        "Stay silent",
+        "After the first reprompt, stay silent again",
+        "After the second reprompt, stay silent again"
+      ],
+      "expected": "First: island/TTS \"🎤 Sorry, I didn't catch that.\" and mic re-arms without wake word. Second: \"I still didn't catch that. Could you say it again?\". Third silence: island returns to idle quietly."
+    },
+    {
+      "key": "asr.noise.cough-rejected",
+      "area": "asr",
+      "title": "Non-speech sounds are not executed",
+      "priority": "P1",
+      "tags": [
+        "voice",
+        "asr",
+        "negative"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis",
+        "Instead of a command, cough, clap twice, or tap the desk"
+      ],
+      "expected": "No action is executed and no cloud request is made; island shows the \"didn't catch that\" reprompt or returns to idle. Log may show 'ignoring non-speech transcript' or '[asr] rejecting'."
+    },
+    {
+      "key": "asr.noise.fan-background",
+      "area": "asr",
+      "title": "Command recognized with fan noise",
+      "priority": "P1",
+      "tags": [
+        "voice",
+        "asr",
+        "noise"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room; desk fan or white-noise video playing ~1 m from mic",
+      "steps": [
+        "Say: Hey Jarvis open notepad",
+        "Repeat 5 times (close Notepad between tries)"
+      ],
+      "expected": "Notepad opens in at least 4 of 5 attempts; no unrelated app opens."
+    },
+    {
+      "key": "asr.followup.no-wake",
+      "area": "asr",
+      "title": "Follow-up answer captured without wake word",
+      "priority": "P1",
+      "tags": [
+        "voice",
+        "asr",
+        "session"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room; Google linked",
+      "steps": [
+        "Say: Hey Jarvis write an email",
+        "When asked \"Who should I send it to?\", answer directly without wake word"
+      ],
+      "expected": "Mic re-arms automatically after the question; your answer is captured and the next question \"What's the subject?\" appears."
+    },
+    {
+      "key": "tts.basic.spoken-answer",
+      "area": "tts",
+      "title": "Voice answers are spoken",
+      "priority": "P0",
+      "tags": [
+        "voice",
+        "tts"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room; speak_responses true; speakers on",
+      "steps": [
+        "Say: Hey Jarvis what day is it"
+      ],
+      "expected": "Island shows \"Speaking…\" with a wave icon and a \"Stop talking\" button while the date is spoken audibly; returns to idle after."
+    },
+    {
+      "key": "tts.typed.silent",
+      "area": "tts",
+      "title": "Typed commands are not spoken",
+      "priority": "P1",
+      "tags": [
+        "tts",
+        "typed"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: what time is it",
+        "Press Enter"
+      ],
+      "expected": "Time is shown on the island but NOT spoken aloud."
+    },
+    {
+      "key": "tts.kokoro.engine",
+      "area": "tts",
+      "title": "Kokoro neural voice used in sherpa build",
+      "priority": "P1",
+      "tags": [
+        "tts",
+        "voice"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room; models/kokoro-en-v0_19 present",
+      "steps": [
+        "Say: Hey Jarvis what's the weather in Paris",
+        "Listen to the voice",
+        "Check voice-agent.log"
+      ],
+      "expected": "Voice sounds neural (not the robotic Windows SAPI voice); log contains '[tts] Kokoro TTS enabled'."
+    },
+    {
+      "key": "tts.fallback.sapi",
+      "area": "tts",
+      "title": "SAPI fallback when Kokoro missing",
+      "priority": "P2",
+      "tags": [
+        "tts",
+        "negative"
+      ],
+      "preconditions": "Voice build; temporarily rename models/kokoro-en-v0_19; restart",
+      "steps": [
+        "Say: Hey Jarvis what time is it"
+      ],
+      "expected": "Answer is still spoken (Windows SAPI voice); log shows '[tts] Kokoro TTS unavailable, using SAPI'. Restore the folder afterwards."
+    },
+    {
+      "key": "tts.opener.speculative",
+      "area": "tts",
+      "title": "Speculative opener on cloud-planned task",
+      "priority": "P2",
+      "tags": [
+        "tts",
+        "latency"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room (Kokoro)",
+      "steps": [
+        "Say: Hey Jarvis research the history of the Eiffel Tower"
+      ],
+      "expected": "Within ~1 s of finishing speaking you hear a short opener such as \"Let me dig into that.\" before the full answer."
+    },
+    {
+      "key": "bargein.voice.talk-over",
+      "area": "bargein",
+      "title": "Talking over the assistant stops it",
+      "priority": "P0",
+      "tags": [
+        "voice",
+        "bargein"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room; speakers at normal volume",
+      "steps": [
+        "Say: Hey Jarvis research the history of jazz",
+        "While the long answer is being spoken, talk loudly for ~1 s: wait wait stop"
+      ],
+      "expected": "Speech stops within ~0.5 s of you starting to talk; island leaves Speaking. (Your interrupting words are not executed as a command.)"
+    },
+    {
+      "key": "bargein.aec.no-self-trigger",
+      "area": "bargein",
+      "title": "Assistant's own voice doesn't interrupt itself",
+      "priority": "P1",
+      "tags": [
+        "voice",
+        "bargein",
+        "aec"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room; laptop speakers (no headphones) at high volume",
+      "steps": [
+        "Say: Hey Jarvis research the history of coffee",
+        "Stay silent and let it speak fully"
+      ],
+      "expected": "Full answer is spoken without cutting itself off; log shows '[bargein] AEC on — loopback echo cancellation active'."
+    },
+    {
+      "key": "bargein.button.stop-talking",
+      "area": "bargein",
+      "title": "Stop talking button cancels speech",
+      "priority": "P0",
+      "tags": [
+        "bargein",
+        "ui"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis research the history of chess",
+        "While speaking, click the stop button (\"Stop talking\") on the island"
+      ],
+      "expected": "Audio stops immediately and island returns to idle."
+    },
+    {
+      "key": "bargein.killswitch.ctrl-esc",
+      "area": "bargein",
+      "title": "Ctrl+Esc kill switch cancels a running turn",
+      "priority": "P0",
+      "tags": [
+        "bargein",
+        "hotkey"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\")",
+      "steps": [
+        "Ctrl+Space, type: research quantum computing in depth, Enter",
+        "While island shows Thinking…/Working…, press Ctrl+Esc"
+      ],
+      "expected": "Operation halts; island returns to idle with no error message; no result card appears later. Note whether Ctrl+Esc also opened the Start menu (known possible issue)."
+    },
+    {
+      "key": "bargein.thinking.wake-interrupts",
+      "area": "bargein",
+      "title": "Wake word during planning interrupts",
+      "priority": "P2",
+      "tags": [
+        "voice",
+        "bargein"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis research the history of Rome",
+        "About 2 s later, while island shows Thinking…, say: Hey Jarvis what time is it"
+      ],
+      "expected": "The research turn is cancelled and the new request (time) is answered."
+    },
+    {
+      "key": "bargein.live.enter-exit",
+      "area": "bargein",
+      "title": "Live conversation mode enter/exit",
+      "priority": "P1",
+      "tags": [
+        "voice",
+        "live"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis let's talk",
+        "Without wake word say: what time is it",
+        "Then say: what's the date",
+        "Then say: stop"
+      ],
+      "expected": "After \"let's talk\": notice \"Live mode on — just talk. Say \"stop\" to exit.\" and a green bar at the bottom of the island. Both questions are answered without the wake word. After \"stop\": \"Live mode off.\" and green bar disappears."
+    },
+    {
+      "key": "resolver.app.open-notepad",
+      "area": "resolver",
+      "title": "Typed 'open notepad' resolves locally",
+      "priority": "P0",
+      "tags": [
+        "typed",
+        "tier0"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: open notepad",
+        "Press Enter"
+      ],
+      "expected": "Island shows \"Dispatching…\" then Notepad opens in under ~1 s; no Thinking phase."
+    },
+    {
+      "key": "resolver.app.offline",
+      "area": "resolver",
+      "title": "Tier-0 commands work offline",
+      "priority": "P0",
+      "tags": [
+        "tier0",
+        "offline"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); Wi-Fi/Ethernet disconnected",
+      "steps": [
+        "Ctrl+Space, type: open calculator, Enter",
+        "Ctrl+Space, type: what time is it, Enter",
+        "Ctrl+Space, type: volume up, Enter"
+      ],
+      "expected": "All three succeed with no network error: Calculator opens, time is shown, volume rises."
+    },
+    {
+      "key": "resolver.polite.wrappers",
+      "area": "resolver",
+      "title": "Polite wrappers still resolve locally",
+      "priority": "P1",
+      "tags": [
+        "tier0",
+        "phrasing"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: could you open chrome for me please, Enter",
+        "Close Chrome",
+        "Type: hey jarvis, um, open chrome, Enter"
+      ],
+      "expected": "Chrome opens instantly both times (local path, no Thinking delay)."
+    },
+    {
+      "key": "resolver.negation.refused",
+      "area": "resolver",
+      "title": "Negated commands never execute locally",
+      "priority": "P0",
+      "tags": [
+        "tier0",
+        "safety"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: don't lock my computer, Enter"
+      ],
+      "expected": "The PC is NOT locked. The request goes to the LLM, which replies conversationally (or does nothing)."
+    },
+    {
+      "key": "resolver.overtrigger.lock-calendar",
+      "area": "resolver",
+      "title": "'block my calendar' does not lock PC",
+      "priority": "P0",
+      "tags": [
+        "tier0",
+        "safety",
+        "negative"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: block my calendar tomorrow afternoon, Enter"
+      ],
+      "expected": "PC is NOT locked; request is handled by the cloud planner (calendar) or answered; never a system lock."
+    },
+    {
+      "key": "resolver.web.search-verb",
+      "area": "resolver",
+      "title": "'search for X' routes to web_search",
+      "priority": "P1",
+      "tags": [
+        "tier0",
+        "web"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: search for best hiking trails near Seattle, Enter"
+      ],
+      "expected": "Answer card lists real DuckDuckGo results (titles, URLs, snippets); a browser does NOT open."
+    },
+    {
+      "key": "resolver.web.personal-not-web",
+      "area": "resolver",
+      "title": "'search my email' is not a web search",
+      "priority": "P2",
+      "tags": [
+        "tier0",
+        "google"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Google linked",
+      "steps": [
+        "Type: search my email for invoice, Enter"
+      ],
+      "expected": "Gmail is searched (results list emails) rather than DuckDuckGo web results."
+    },
+    {
+      "key": "resolver.file.open-file",
+      "area": "resolver",
+      "title": "'open file X' opens indexed file",
+      "priority": "P0",
+      "tags": [
+        "tier0",
+        "fileindex"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Documents\\qa-budget.xlsx (or any file) exists and app has run ≥1 min",
+      "steps": [
+        "Type: open file qa-budget, Enter"
+      ],
+      "expected": "The file opens in its default app."
+    },
+    {
+      "key": "resolver.file.natural",
+      "area": "resolver",
+      "title": "'open my latest resume' natural file open",
+      "priority": "P1",
+      "tags": [
+        "tier0",
+        "fileindex"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; a file named e.g. Resume_2026.pdf in Documents",
+      "steps": [
+        "Type: open my resume, Enter"
+      ],
+      "expected": "The resume file opens locally (no Thinking delay)."
+    },
+    {
+      "key": "resolver.screen.whats-on",
+      "area": "resolver",
+      "title": "'what's on my screen' routes to screen analysis",
+      "priority": "P1",
+      "tags": [
+        "tier0",
+        "vision"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; a web page with visible text is open",
+      "steps": [
+        "Type: what's on my screen, Enter"
+      ],
+      "expected": "After a few seconds an answer card describes the visible page content accurately."
+    },
+    {
+      "key": "orchestrator.multistep.open-and-type",
+      "area": "orchestrator",
+      "title": "Multi-step plan: open Notepad and type",
+      "priority": "P0",
+      "tags": [
+        "tier1",
+        "plan"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: open notepad and type hello world, Enter"
+      ],
+      "expected": "Island shows progress (\"1 of 2 · …\"), Notepad opens and \"hello world\" is typed into it."
+    },
+    {
+      "key": "orchestrator.ai-prefix",
+      "area": "orchestrator",
+      "title": "'ai <prompt>' direct LLM call",
+      "priority": "P1",
+      "tags": [
+        "tier1",
+        "typed"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: ai explain what a black hole is in two sentences, Enter"
+      ],
+      "expected": "An answer card shows a two-sentence explanation."
+    },
+    {
+      "key": "orchestrator.question.general",
+      "area": "orchestrator",
+      "title": "General knowledge question answered",
+      "priority": "P0",
+      "tags": [
+        "tier1",
+        "voice"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis who wrote Pride and Prejudice"
+      ],
+      "expected": "Island shows Thinking… then \"Jane Austen\" (spoken and shown) within ~3 s."
+    },
+    {
+      "key": "orchestrator.screen.error-explain",
+      "area": "orchestrator",
+      "title": "Screen path explains an on-screen error",
+      "priority": "P1",
+      "tags": [
+        "tier1",
+        "vision"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; an error dialog or error text visible on screen",
+      "steps": [
+        "Type: explain this error on my screen, Enter"
+      ],
+      "expected": "Answer card explains the specific visible error (mentions its wording), proving a screenshot was used."
+    },
+    {
+      "key": "orchestrator.document.create-local",
+      "area": "orchestrator",
+      "title": "Create a document (Google not linked)",
+      "priority": "P1",
+      "tags": [
+        "tier1",
+        "docs"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Google NOT linked",
+      "steps": [
+        "Type: create a document about healthy breakfast ideas, Enter",
+        "Approve if an approval card appears"
+      ],
+      "expected": "Message \"Google isn't connected, so I saved it locally instead.\" / \"✅ Saved \"…\" to <path> and opened it\"; file opens with headings and lists."
+    },
+    {
+      "key": "orchestrator.followup.it",
+      "area": "orchestrator",
+      "title": "Follow-up 'make it longer' edits same doc",
+      "priority": "P2",
+      "tags": [
+        "tier1",
+        "session"
+      ],
+      "preconditions": "Immediately after orchestrator.document.create-local",
+      "steps": [
+        "Ctrl+Space, type: make it longer, Enter"
+      ],
+      "expected": "The same document is edited (not a new one created); opener \"Sure, updating that now.\" if voice. Note: LLM-dependent — retry once if it misroutes."
+    },
+    {
+      "key": "orchestrator.email.guided",
+      "area": "orchestrator",
+      "title": "Guided email session prompts step by step",
+      "priority": "P1",
+      "tags": [
+        "tier1",
+        "google",
+        "session"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Google linked",
+      "steps": [
+        "Type: write an email, Enter",
+        "Answer: <your own address>",
+        "Answer: QA test",
+        "Answer: This is a test from the voice agent",
+        "On the confirmation, click Approve"
+      ],
+      "expected": "Prompts appear in order: \"Who should I send it to?\", \"What's the subject?\", \"What should the email say?\", then \"Send to \"…\" — subject \"QA test\"?\". After approval the email arrives in your inbox."
+    },
+    {
+      "key": "trust.gate.delete-risky",
+      "area": "trust",
+      "title": "Delete shows Risky approval card",
+      "priority": "P0",
+      "tags": [
+        "trust",
+        "approval"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Desktop\\qa-delete-me.txt exists",
+      "steps": [
+        "Type: delete file qa-delete-me.txt on my desktop, Enter",
+        "Read the card",
+        "Click Approve"
+      ],
+      "expected": "Card \"Review action request\" with \"Step 1 · ⚠ Risky\" and \"Delete qa-delete-me.txt\"; after Approve the file is gone. Record if TWO approval cards appear in a row (known possible double-prompt)."
+    },
+    {
+      "key": "trust.gate.cancel",
+      "area": "trust",
+      "title": "Cancel on approval card does nothing",
+      "priority": "P0",
+      "tags": [
+        "trust",
+        "approval"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Desktop\\qa-delete-me.txt exists",
+      "steps": [
+        "Type: delete file qa-delete-me.txt on my desktop, Enter",
+        "Click Cancel"
+      ],
+      "expected": "Message \"Stopped: not approved, so nothing was done\"; file still exists."
+    },
+    {
+      "key": "trust.gate.safe-no-card",
+      "area": "trust",
+      "title": "Safe single step runs without approval",
+      "priority": "P0",
+      "tags": [
+        "trust"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: open notepad, Enter"
+      ],
+      "expected": "Notepad opens with no approval card."
+    },
+    {
+      "key": "trust.gate.timeout",
+      "area": "trust",
+      "title": "Unanswered approval times out after 90 s",
+      "priority": "P2",
+      "tags": [
+        "trust",
+        "edge"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Desktop\\qa-delete-me.txt exists",
+      "steps": [
+        "Type: delete file qa-delete-me.txt on my desktop, Enter",
+        "Do not touch the card for 100 seconds"
+      ],
+      "expected": "Card disappears around 90 s; file still exists; log/narration \"Stopped: I stopped waiting for an answer, so nothing was done\". Note whether the UI showed any message (may be silent)."
+    },
+    {
+      "key": "trust.gate.large-plan",
+      "area": "trust",
+      "title": "Plan with 6+ steps requires approval",
+      "priority": "P1",
+      "tags": [
+        "trust",
+        "plan"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: open notepad, calculator, paint, wordpad, task manager and file explorer, Enter"
+      ],
+      "expected": "Card \"Review this 6-step task\" (or more) listing each step as \"Step N · Safe\"; nothing opens until Approve; after Approve all apps open with \"N of M\" progress on the island."
+    },
+    {
+      "key": "trust.ladder.ask-choice",
+      "area": "trust",
+      "title": "Failing step offers Try again / Skip / Stop",
+      "priority": "P0",
+      "tags": [
+        "trust",
+        "recovery"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: open the file zzqq-does-not-exist-9876.txt and then open notepad, Enter",
+        "Wait for the choice card"
+      ],
+      "expected": "After automatic retries/replan, a \"Your call\" card asks \"I couldn't finish … — …. What should I do?\" with options \"Try that again\", \"Skip it and carry on\", \"Stop here\"."
+    },
+    {
+      "key": "trust.ladder.skip",
+      "area": "trust",
+      "title": "Skip abandons one step, rest of plan runs",
+      "priority": "P0",
+      "tags": [
+        "trust",
+        "recovery"
+      ],
+      "preconditions": "Choice card from trust.ladder.ask-choice is showing",
+      "steps": [
+        "Click \"Skip it and carry on\" (or press 2)"
+      ],
+      "expected": "The failing step is skipped and Notepad still opens."
+    },
+    {
+      "key": "trust.ladder.stop",
+      "area": "trust",
+      "title": "Stop here aborts remaining steps",
+      "priority": "P1",
+      "tags": [
+        "trust",
+        "recovery"
+      ],
+      "preconditions": "Repeat trust.ladder.ask-choice to get the choice card again",
+      "steps": [
+        "Press ↓ twice to highlight \"Stop here\" and press Enter"
+      ],
+      "expected": "Plan stops; Notepad does NOT open; island returns to idle."
+    },
+    {
+      "key": "trust.restricted.windows-path",
+      "area": "trust",
+      "title": "Delete in system folders is blocked",
+      "priority": "P1",
+      "tags": [
+        "trust",
+        "safety"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: delete C:\\Windows\\System32\\drivers\\etc\\hosts, Enter",
+        "If an approval card appears, click Approve"
+      ],
+      "expected": "The file is NOT deleted; error \"action blocked: path contains restricted directory\" (shown as a failure message)."
+    },
+    {
+      "key": "fileindex.search.new-file-live",
+      "area": "fileindex",
+      "title": "Newly created file is findable within seconds",
+      "priority": "P0",
+      "tags": [
+        "fileindex",
+        "fsnotify"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\")",
+      "steps": [
+        "In Explorer create Documents\\zebra-qa-report.txt",
+        "Wait 10 s",
+        "Ctrl+Space, type: open file zebra-qa-report, Enter"
+      ],
+      "expected": "The new file opens (index picked it up live without restart)."
+    },
+    {
+      "key": "fileindex.search.deleted-file",
+      "area": "fileindex",
+      "title": "Deleted file is no longer opened",
+      "priority": "P2",
+      "tags": [
+        "fileindex",
+        "fsnotify"
+      ],
+      "preconditions": "After fileindex.search.new-file-live",
+      "steps": [
+        "Delete Documents\\zebra-qa-report.txt in Explorer",
+        "Wait 10 s",
+        "Ctrl+Space, type: open file zebra-qa-report, Enter"
+      ],
+      "expected": "Message like \"could not find a file matching \"zebra-qa-report\"\"; no error dialog from Windows about a missing file."
+    },
+    {
+      "key": "fileindex.recency.prefers-recent",
+      "area": "fileindex",
+      "title": "Recently modified file ranks higher",
+      "priority": "P1",
+      "tags": [
+        "fileindex",
+        "ranking"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); two files Documents\\notes-old.txt (unchanged for months) and Desktop\\notes-new.txt (edit and save it now)",
+      "steps": [
+        "Ctrl+Space, type: open file notes, Enter"
+      ],
+      "expected": "notes-new.txt opens (recency weighting), or a choice card lists both with notes-new first."
+    },
+    {
+      "key": "fileindex.alias.remember-file",
+      "area": "fileindex",
+      "title": "Remember a file by nickname",
+      "priority": "P1",
+      "tags": [
+        "fileindex",
+        "alias"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); a file Documents\\Q3_Financials_FINAL_v7.xlsx",
+      "steps": [
+        "Ctrl+Space, type: remember Q3_Financials_FINAL_v7 as my budget, Enter",
+        "Ctrl+Space, type: open my budget, Enter"
+      ],
+      "expected": "First: \"Remembered \"my budget\" as <path>\" (or similar). Second: the xlsx opens."
+    },
+    {
+      "key": "fileindex.semantic.fallback",
+      "area": "fileindex",
+      "title": "Semantic search finds file by meaning",
+      "priority": "P2",
+      "tags": [
+        "fileindex",
+        "semantic"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); semantic_search true; models/bge-small-en-v1.5 present; Documents\\trip.txt containing 'flight to Tokyo, hotel in Shinjuku'",
+      "steps": [
+        "Wait 2 min after creating the file",
+        "Ctrl+Space, type: find my japan travel itinerary, Enter"
+      ],
+      "expected": "trip.txt is found/opened even though the filename shares no words with the query."
+    },
+    {
+      "key": "fileindex.persist.restart",
+      "area": "fileindex",
+      "title": "Index persists across restart",
+      "priority": "P1",
+      "tags": [
+        "fileindex"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\")",
+      "steps": [
+        "Quit the app from Control Center",
+        "Relaunch",
+        "Immediately (within 5 s) type via Ctrl+Space: open file qa-budget, Enter"
+      ],
+      "expected": "File opens quickly without waiting for a full re-scan; fileindex.db exists in the app folder."
+    },
+    {
+      "key": "apps.open.voice",
+      "area": "apps",
+      "title": "Open an app by voice",
+      "priority": "P0",
+      "tags": [
+        "voice",
+        "apps"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis open paint"
+      ],
+      "expected": "Microsoft Paint opens within ~2 s."
+    },
+    {
+      "key": "apps.close.named",
+      "area": "apps",
+      "title": "Close a named app",
+      "priority": "P0",
+      "tags": [
+        "apps"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Notepad open",
+      "steps": [
+        "Type: close notepad, Enter"
+      ],
+      "expected": "Notepad closes; message \"Closed notepad\" (unsaved-changes prompt from Notepad is acceptable)."
+    },
+    {
+      "key": "apps.close.not-running",
+      "area": "apps",
+      "title": "Close an app that isn't running",
+      "priority": "P2",
+      "tags": [
+        "apps",
+        "negative"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Paint not running",
+      "steps": [
+        "Type: close paint, Enter"
+      ],
+      "expected": "Message like 'no open window matching \"paint\"'; nothing else closes."
+    },
+    {
+      "key": "apps.close.all-refused",
+      "area": "apps",
+      "title": "'close all my windows' not handled as close_app",
+      "priority": "P1",
+      "tags": [
+        "apps",
+        "safety"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; several apps open",
+      "steps": [
+        "Type: close all my windows, Enter"
+      ],
+      "expected": "Nothing is closed instantly by the local path; if anything happens it goes through the LLM and an approval/review. No mass close without a prompt."
+    },
+    {
+      "key": "apps.switch.focus",
+      "area": "apps",
+      "title": "'switch to chrome' focuses existing window",
+      "priority": "P1",
+      "tags": [
+        "apps",
+        "window"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; Chrome open but behind other windows",
+      "steps": [
+        "Type: switch to chrome, Enter"
+      ],
+      "expected": "Existing Chrome window comes to the front (no second Chrome window)."
+    },
+    {
+      "key": "web.search.results",
+      "area": "web",
+      "title": "web_search returns results inline",
+      "priority": "P0",
+      "tags": [
+        "web"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: search for current population of Canada, Enter"
+      ],
+      "expected": "Answer card with DuckDuckGo results (title/URL/snippet); no browser tab opens."
+    },
+    {
+      "key": "web.research.summary",
+      "area": "web",
+      "title": "research tool produces a synthesized answer",
+      "priority": "P1",
+      "tags": [
+        "web",
+        "tier1"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: research the pros and cons of electric cars, Enter"
+      ],
+      "expected": "After some seconds an answer card with a synthesized summary (pros and cons), not just raw links."
+    },
+    {
+      "key": "web.open.website-name",
+      "area": "web",
+      "title": "Open site by name",
+      "priority": "P1",
+      "tags": [
+        "web"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis go to wikipedia.org"
+      ],
+      "expected": "Browser opens wikipedia.org."
+    },
+    {
+      "key": "web.offline.search",
+      "area": "web",
+      "title": "Web search while offline",
+      "priority": "P1",
+      "tags": [
+        "web",
+        "offline",
+        "negative"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; network disconnected",
+      "steps": [
+        "Type: search for weather news, Enter"
+      ],
+      "expected": "A friendly error (e.g. \"I couldn't reach the network for that one.\"); island returns to idle; no hang."
+    },
+    {
+      "key": "media.pause.play",
+      "area": "media",
+      "title": "Pause and resume system media",
+      "priority": "P0",
+      "tags": [
+        "media",
+        "tier0"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; a YouTube video playing in browser",
+      "steps": [
+        "Type: pause, Enter",
+        "Wait 3 s",
+        "Type: play, Enter"
+      ],
+      "expected": "Video pauses, then resumes."
+    },
+    {
+      "key": "media.volume.up-down",
+      "area": "media",
+      "title": "Volume up / down / mute",
+      "priority": "P0",
+      "tags": [
+        "media",
+        "tier0"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: volume up, Enter",
+        "Type: turn it down, Enter",
+        "Type: mute, Enter",
+        "Type: unmute, Enter"
+      ],
+      "expected": "Windows volume flyout shows the level rising, then falling, then muted, then unmuted."
+    },
+    {
+      "key": "media.next.track",
+      "area": "media",
+      "title": "Next / previous track by voice",
+      "priority": "P1",
+      "tags": [
+        "media",
+        "voice"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room; a playlist playing in any media player",
+      "steps": [
+        "Say: Hey Jarvis next song",
+        "Say: Hey Jarvis previous track"
+      ],
+      "expected": "Player skips forward, then back."
+    },
+    {
+      "key": "system.lock.pc",
+      "area": "system",
+      "title": "Lock the PC",
+      "priority": "P1",
+      "tags": [
+        "system",
+        "tier0"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: lock my computer, Enter"
+      ],
+      "expected": "Windows lock screen appears immediately (no approval card)."
+    },
+    {
+      "key": "system.brightness.updown",
+      "area": "system",
+      "title": "Brightness up and down",
+      "priority": "P1",
+      "tags": [
+        "system",
+        "tier0"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; laptop with adjustable brightness",
+      "steps": [
+        "Type: brightness down, Enter",
+        "Type: brightness up, Enter"
+      ],
+      "expected": "Screen dims then brightens."
+    },
+    {
+      "key": "system.sleep.guarded",
+      "area": "system",
+      "title": "'suspend the meeting' does not sleep PC",
+      "priority": "P0",
+      "tags": [
+        "system",
+        "safety",
+        "negative"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: suspend the meeting, Enter"
+      ],
+      "expected": "PC does NOT go to sleep."
+    },
+    {
+      "key": "system.battery.status",
+      "area": "system",
+      "title": "Battery status question",
+      "priority": "P1",
+      "tags": [
+        "system"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: how much battery do I have, Enter"
+      ],
+      "expected": "Battery percentage and charging state shown (desktop PCs: \"This device doesn't have a battery.\")."
+    },
+    {
+      "key": "system.weather.city",
+      "area": "system",
+      "title": "Weather for a city",
+      "priority": "P1",
+      "tags": [
+        "system",
+        "weather"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: what's the weather in Tokyo, Enter"
+      ],
+      "expected": "\"It's N°C and <description> in Tokyo…\" shown within ~2 s."
+    },
+    {
+      "key": "system.shutdown.gated",
+      "area": "system",
+      "title": "Shutdown request never runs silently",
+      "priority": "P0",
+      "tags": [
+        "system",
+        "safety"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; save your work first",
+      "steps": [
+        "Type: shut down my computer, Enter"
+      ],
+      "expected": "PC does NOT shut down without explicit approval. Record actual behavior (the tool may say it can't shut down)."
+    },
+    {
+      "key": "window.snap.left-right",
+      "area": "window",
+      "title": "Snap window left and right",
+      "priority": "P1",
+      "tags": [
+        "window",
+        "tier0"
+      ],
+      "preconditions": "Notepad focused; command sheet opened via Ctrl+Space",
+      "steps": [
+        "Type: snap left, Enter",
+        "Click Notepad, Ctrl+Space, type: snap right, Enter"
+      ],
+      "expected": "Notepad snaps to left half, then right half."
+    },
+    {
+      "key": "window.minmax",
+      "area": "window",
+      "title": "Minimize and maximize",
+      "priority": "P1",
+      "tags": [
+        "window",
+        "tier0"
+      ],
+      "preconditions": "Notepad focused",
+      "steps": [
+        "Ctrl+Space, type: maximize, Enter",
+        "Ctrl+Space, type: minimize, Enter"
+      ],
+      "expected": "Notepad maximizes, then minimizes. Command applies to Notepad, not to the island."
+    },
+    {
+      "key": "window.close.this",
+      "area": "window",
+      "title": "Close this window",
+      "priority": "P2",
+      "tags": [
+        "window",
+        "tier0"
+      ],
+      "preconditions": "Paint focused",
+      "steps": [
+        "Ctrl+Space, type: close this window, Enter"
+      ],
+      "expected": "Paint closes (not the island or another app)."
+    },
+    {
+      "key": "productivity.timer.basic",
+      "area": "productivity",
+      "title": "Start a timer and see it on the island",
+      "priority": "P1",
+      "tags": [
+        "timer",
+        "island"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: set a timer for 1 minute called tea, Enter",
+        "Wait 70 s"
+      ],
+      "expected": "\"Started a timer for 1 minute.\"; island shows a countdown ring with MM:SS and \"tea\"; at 0 it expands briefly and shows \"⏰ Timer Complete: tea\"."
+    },
+    {
+      "key": "productivity.todo.add-list",
+      "area": "productivity",
+      "title": "Add and list todos",
+      "priority": "P1",
+      "tags": [
+        "todo"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: add buy milk to my todo list, Enter",
+        "Type: what's on my todo list, Enter"
+      ],
+      "expected": "Confirmation of the added todo; listing includes \"buy milk\"."
+    },
+    {
+      "key": "productivity.reminder.fires",
+      "area": "productivity",
+      "title": "Reminder fires on time",
+      "priority": "P1",
+      "tags": [
+        "reminder"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis remind me to stretch in 2 minutes",
+        "Wait 2.5 minutes"
+      ],
+      "expected": "Confirmation shown; at ~2 minutes the island shows the reminder (and speaks it)."
+    },
+    {
+      "key": "productivity.calc.math",
+      "area": "productivity",
+      "title": "Calculator accuracy",
+      "priority": "P1",
+      "tags": [
+        "calculate"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: what is 17.5% of 2340, Enter",
+        "Type: convert 5 miles to kilometers, Enter"
+      ],
+      "expected": "409.5 and ~8.05 km shown."
+    },
+    {
+      "key": "productivity.clipboard.rewrite",
+      "area": "productivity",
+      "title": "Rewrite clipboard text",
+      "priority": "P2",
+      "tags": [
+        "clipboard",
+        "tier1"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space; copy the text 'me and him goes to store yesterday' to the clipboard",
+      "steps": [
+        "Type: fix the grammar of my clipboard, Enter"
+      ],
+      "expected": "Corrected sentence shown (e.g. 'He and I went to the store yesterday')."
+    },
+    {
+      "key": "spotify.link.connect",
+      "area": "spotify",
+      "title": "Link Spotify from Control Center",
+      "priority": "P0",
+      "tags": [
+        "spotify",
+        "oauth"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); spotify_client_id/secret configured; Spotify account",
+      "steps": [
+        "Open Control Center (gear) → Integrations",
+        "Click Connect on Spotify",
+        "Sign in and approve in browser",
+        "Return to the app"
+      ],
+      "expected": "Island drops always-on-top during sign-in; afterwards Spotify card shows \"Connected\" and \"Connected as <name> (<product>)\" within ~5 s."
+    },
+    {
+      "key": "spotify.play.song",
+      "area": "spotify",
+      "title": "Play a specific song",
+      "priority": "P0",
+      "tags": [
+        "spotify",
+        "voice"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room; Spotify linked; Spotify desktop app open",
+      "steps": [
+        "Say: Hey Jarvis play Bohemian Rhapsody on Spotify"
+      ],
+      "expected": "Song starts within ~3 s; message \"▶️ Playing: …\"."
+    },
+    {
+      "key": "spotify.nowplaying.island",
+      "area": "spotify",
+      "title": "Now-playing live activity",
+      "priority": "P1",
+      "tags": [
+        "spotify",
+        "island"
+      ],
+      "preconditions": "Spotify linked and a song playing",
+      "steps": [
+        "Wait ~5 s",
+        "Hover over the island",
+        "Click next in the media widget"
+      ],
+      "expected": "Island shows album art + \"Track · Artist\" + equalizer; hover expands to a media widget with prev/pause/next; next skips the track."
+    },
+    {
+      "key": "spotify.device.no-active-recovery",
+      "area": "spotify",
+      "title": "NO_ACTIVE_DEVICE auto recovery",
+      "priority": "P0",
+      "tags": [
+        "spotify",
+        "recovery"
+      ],
+      "preconditions": "Spotify linked, Premium; Spotify desktop open but idle for 10+ minutes (no active device)",
+      "steps": [
+        "Ctrl+Space, type: spotify next track (or: pause spotify), Enter"
+      ],
+      "expected": "Command succeeds after one transparent transfer+retry (e.g. \"⏭️ Skipped to next track\"); no device error shown."
+    },
+    {
+      "key": "spotify.device.none",
+      "area": "spotify",
+      "title": "No Spotify devices available",
+      "priority": "P1",
+      "tags": [
+        "spotify",
+        "negative"
+      ],
+      "preconditions": "Spotify linked; Spotify closed on all devices",
+      "steps": [
+        "Ctrl+Space, type: play some jazz on spotify, Enter"
+      ],
+      "expected": "Either the web player opens (\"… (in the Spotify web player)\" / \"Opened … press play to start.\") or \"no Spotify devices available — open Spotify on a device first\"."
+    },
+    {
+      "key": "spotify.seek.relative",
+      "area": "spotify",
+      "title": "Seek forward and to absolute time",
+      "priority": "P2",
+      "tags": [
+        "spotify"
+      ],
+      "preconditions": "Spotify linked, song playing",
+      "steps": [
+        "Ctrl+Space, type: skip ahead 30 seconds on spotify, Enter",
+        "Ctrl+Space, type: seek to 1:30 on spotify, Enter"
+      ],
+      "expected": "Position jumps +30 s, then to 1:30; message \"Seeked to 1:30\"."
+    },
+    {
+      "key": "spotify.save.liked",
+      "area": "spotify",
+      "title": "Save current song to Liked Songs",
+      "priority": "P1",
+      "tags": [
+        "spotify"
+      ],
+      "preconditions": "Spotify linked (after the user-library-modify re-link), song playing",
+      "steps": [
+        "Ctrl+Space, type: save this song, Enter",
+        "Check Liked Songs in Spotify"
+      ],
+      "expected": "Song appears in Liked Songs."
+    },
+    {
+      "key": "spotify.save.relink-403",
+      "area": "spotify",
+      "title": "Old link without scope prompts re-link",
+      "priority": "P2",
+      "tags": [
+        "spotify",
+        "negative"
+      ],
+      "preconditions": "Spotify token from before the save feature (missing user-library-modify scope)",
+      "steps": [
+        "Ctrl+Space, type: like this song, Enter"
+      ],
+      "expected": "Message \"Re-link Spotify to enable saving songs (⚙ → Spotify).\""
+    },
+    {
+      "key": "google.link.connect",
+      "area": "google",
+      "title": "Link Google Workspace",
+      "priority": "P0",
+      "tags": [
+        "google",
+        "oauth"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); google_client_id/secret configured",
+      "steps": [
+        "Control Center → Integrations → Google Workspace → Connect",
+        "Complete browser sign-in",
+        "Return to app"
+      ],
+      "expected": "Card shows \"Connected\" and \"Connected as <email> — Docs, Sheets, Slides, Drive, Gmail, Calendar.\""
+    },
+    {
+      "key": "google.calendar.list",
+      "area": "google",
+      "title": "List today's calendar events",
+      "priority": "P0",
+      "tags": [
+        "google",
+        "calendar"
+      ],
+      "preconditions": "Google linked; at least one event today",
+      "steps": [
+        "Say: Hey Jarvis what's on my calendar today"
+      ],
+      "expected": "Opener \"Checking your calendar.\" (Kokoro); events listed with times, matching Google Calendar."
+    },
+    {
+      "key": "google.calendar.add",
+      "area": "google",
+      "title": "Add a calendar event (Risky)",
+      "priority": "P1",
+      "tags": [
+        "google",
+        "calendar",
+        "trust"
+      ],
+      "preconditions": "Google linked",
+      "steps": [
+        "Ctrl+Space, type: add a meeting called QA sync tomorrow at 3pm, Enter",
+        "Review card, click Approve",
+        "Check Google Calendar"
+      ],
+      "expected": "Approval card first; after approve, exactly one 'QA sync' event tomorrow 3 PM exists (no duplicate)."
+    },
+    {
+      "key": "google.gmail.search",
+      "area": "google",
+      "title": "Search Gmail",
+      "priority": "P1",
+      "tags": [
+        "google",
+        "gmail"
+      ],
+      "preconditions": "Google linked",
+      "steps": [
+        "Ctrl+Space, type: find emails from amazon, Enter"
+      ],
+      "expected": "List of matching emails (sender, subject)."
+    },
+    {
+      "key": "google.docs.create",
+      "area": "google",
+      "title": "Create a Google Doc",
+      "priority": "P1",
+      "tags": [
+        "google",
+        "docs",
+        "trust"
+      ],
+      "preconditions": "Google linked",
+      "steps": [
+        "Ctrl+Space, type: create a google doc with a weekly meal plan, Enter",
+        "Approve if asked"
+      ],
+      "expected": "\"✅ Created \"…\" in Google Docs and opened it (N sections).\"; doc opens in browser with headings/lists."
+    },
+    {
+      "key": "google.expired.relink",
+      "area": "google",
+      "title": "Expired Google token prompts re-link",
+      "priority": "P2",
+      "tags": [
+        "google",
+        "negative"
+      ],
+      "preconditions": "Google linked; revoke the app at myaccount.google.com/permissions",
+      "steps": [
+        "Ctrl+Space, type: what's on my calendar today, Enter",
+        "Open Control Center → Integrations"
+      ],
+      "expected": "Notice \"Google needs re-linking — open Settings to reconnect.\" (or similar); card shows \"Sign-in expired — reconnect to restore Gmail, Calendar and Drive.\""
+    },
+    {
+      "key": "google.notlinked.message",
+      "area": "google",
+      "title": "Google command when not linked",
+      "priority": "P1",
+      "tags": [
+        "google",
+        "negative"
+      ],
+      "preconditions": "Google NOT linked",
+      "steps": [
+        "Ctrl+Space, type: list my google drive files, Enter"
+      ],
+      "expected": "\"I couldn't do that — the account it needs isn't connected. Link it in the Control Center and try again.\" (no hang)."
+    },
+    {
+      "key": "microsoft.link.connect",
+      "area": "microsoft",
+      "title": "Link Microsoft 365",
+      "priority": "P1",
+      "tags": [
+        "microsoft",
+        "oauth"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); microsoft_client_id/secret configured",
+      "steps": [
+        "Control Center → Integrations → Microsoft 365 → Connect",
+        "Complete sign-in"
+      ],
+      "expected": "Card shows \"Connected\"."
+    },
+    {
+      "key": "microsoft.outlook.list",
+      "area": "microsoft",
+      "title": "List Outlook emails",
+      "priority": "P1",
+      "tags": [
+        "microsoft"
+      ],
+      "preconditions": "Microsoft linked",
+      "steps": [
+        "Ctrl+Space, type: show my latest outlook emails, Enter"
+      ],
+      "expected": "Recent Outlook emails listed."
+    },
+    {
+      "key": "microsoft.word.write",
+      "area": "microsoft",
+      "title": "Write a Word document (Risky)",
+      "priority": "P2",
+      "tags": [
+        "microsoft",
+        "trust"
+      ],
+      "preconditions": "Microsoft linked",
+      "steps": [
+        "Ctrl+Space, type: write a word document in onedrive titled QA Notes saying hello, Enter",
+        "Approve"
+      ],
+      "expected": "Approval card first; then QA Notes.docx appears in OneDrive with 'hello'."
+    },
+    {
+      "key": "microsoft.status.stale-token",
+      "area": "microsoft",
+      "title": "Status reflects a revoked token",
+      "priority": "P3",
+      "tags": [
+        "microsoft",
+        "ui",
+        "known-issue"
+      ],
+      "preconditions": "Microsoft linked, then revoke app consent at account.microsoft.com",
+      "steps": [
+        "Open Control Center → Integrations"
+      ],
+      "expected": "Record behavior. Known risk: card still shows \"Connected\" (status only checks token presence); a command then fails with a re-link message."
+    },
+    {
+      "key": "memory.remember.recall",
+      "area": "memory",
+      "title": "Remember and recall a fact",
+      "priority": "P0",
+      "tags": [
+        "memory"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: remember that my favorite editor is VS Code, Enter",
+        "Type: what is my favorite editor, Enter"
+      ],
+      "expected": "First: \"Remembered: …\". Second: answer mentions VS Code."
+    },
+    {
+      "key": "memory.persist.restart",
+      "area": "memory",
+      "title": "Memory persists across restart",
+      "priority": "P1",
+      "tags": [
+        "memory"
+      ],
+      "preconditions": "After memory.remember.recall",
+      "steps": [
+        "Quit and relaunch the app",
+        "Ctrl+Space, type: what is my favorite editor, Enter"
+      ],
+      "expected": "Answer still mentions VS Code."
+    },
+    {
+      "key": "memory.update.correct",
+      "area": "memory",
+      "title": "Correct a stored fact",
+      "priority": "P2",
+      "tags": [
+        "memory"
+      ],
+      "preconditions": "After memory.remember.recall",
+      "steps": [
+        "Ctrl+Space, type: actually my favorite editor is Neovim not VS Code, Enter",
+        "Ctrl+Space, type: what is my favorite editor, Enter"
+      ],
+      "expected": "\"Updated memory: \"…VS Code\" → \"…Neovim\"\"; answer is Neovim only."
+    },
+    {
+      "key": "memory.forget.confirm",
+      "area": "memory",
+      "title": "Forget requires confirmation",
+      "priority": "P1",
+      "tags": [
+        "memory",
+        "trust"
+      ],
+      "preconditions": "A stored memory about the editor",
+      "steps": [
+        "Ctrl+Space, type: forget my favorite editor, Enter",
+        "Approve the card",
+        "Type: list my memories, Enter"
+      ],
+      "expected": "Approval card appears; then \"Forgot 1 memory:\"; list no longer contains it."
+    },
+    {
+      "key": "memory.ui.tab",
+      "area": "memory",
+      "title": "Memory tab in Control Center",
+      "priority": "P2",
+      "tags": [
+        "memory",
+        "ui"
+      ],
+      "preconditions": "Some memories stored",
+      "steps": [
+        "Open Control Center → Memory tab",
+        "Delete one memory",
+        "Use delete-all and confirm the dialog"
+      ],
+      "expected": "Memories listed; single delete shows \"Forgotten\"; delete-all asks \"This will delete EVERY memory. This cannot be undone. Continue?\" and then list is empty."
+    },
+    {
+      "key": "memory.sensitive.not-learned",
+      "area": "memory",
+      "title": "Sensitive statements not auto-learned",
+      "priority": "P2",
+      "tags": [
+        "memory",
+        "privacy"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type twice (two separate submissions): my bank password is hunter2, Enter",
+        "Type: list my memories, Enter"
+      ],
+      "expected": "No memory containing 'hunter2' or 'password' was auto-saved."
+    },
+    {
+      "key": "island.states.cycle",
+      "area": "island",
+      "title": "State sequence Listening → Thinking → Working → Speaking",
+      "priority": "P0",
+      "tags": [
+        "island",
+        "voice"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Say: Hey Jarvis open notepad and type hello",
+        "Watch the island throughout"
+      ],
+      "expected": "Labels progress \"Listening…\" → \"Thinking…\" → \"Working…\" (with \"N of M · step\") → back to idle/\"Ready\" (\"Speaking…\" if a reply is spoken)."
+    },
+    {
+      "key": "island.command.sheet",
+      "area": "island",
+      "title": "Command sheet opens and submits",
+      "priority": "P0",
+      "tags": [
+        "island",
+        "typed"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\")",
+      "steps": [
+        "Press Ctrl+Space",
+        "Observe the sheet",
+        "Type: open calculator, press Enter"
+      ],
+      "expected": "Sheet shows \"Ask anything.\", placeholder \"Try: open notepad · summarize this · play focus music\", suggestion chips; on Enter it shows \"Dispatching…\" and Calculator opens. Note: the hint chip reads \"⌘ Space\" (should say Ctrl+Space — log as UI bug)."
+    },
+    {
+      "key": "island.command.esc-history",
+      "area": "island",
+      "title": "Esc collapses sheet; Alt+↑ recalls history",
+      "priority": "P2",
+      "tags": [
+        "island",
+        "typed"
+      ],
+      "preconditions": "At least one earlier typed command",
+      "steps": [
+        "Ctrl+Space",
+        "Press Alt+↑",
+        "Press Esc"
+      ],
+      "expected": "Alt+↑ fills the previous command; Esc collapses the sheet without running anything."
+    },
+    {
+      "key": "island.click.pill-listens",
+      "area": "island",
+      "title": "Clicking idle pill starts listening",
+      "priority": "P1",
+      "tags": [
+        "island",
+        "voice"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Click the idle island pill once",
+        "Say: what time is it"
+      ],
+      "expected": "Island enters \"Listening…\" on click and answers the time. Double-clicking quickly does not start two sessions."
+    },
+    {
+      "key": "island.clickthrough.desktop",
+      "area": "island",
+      "title": "Clicks outside island pass through",
+      "priority": "P0",
+      "tags": [
+        "island",
+        "region"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); a desktop icon or window directly below/next to the island",
+      "steps": [
+        "Click on a desktop icon or app area just beside the island (within 300 px horizontally)",
+        "Also click ~100 px below the dormant pill"
+      ],
+      "expected": "Clicks reach the underlying app/desktop (icon selects, window focuses); the invisible overlay never blocks clicks outside the visible island."
+    },
+    {
+      "key": "island.clickthrough.after-resize",
+      "area": "island",
+      "title": "Click-through still correct after island grows/shrinks",
+      "priority": "P1",
+      "tags": [
+        "island",
+        "region"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\")",
+      "steps": [
+        "Ctrl+Space, type: research the history of tea, Enter (answer card appears)",
+        "Close the answer card with ✕",
+        "Click where the card used to be"
+      ],
+      "expected": "After closing, the area where the card was is click-through again."
+    },
+    {
+      "key": "island.answer.card",
+      "area": "island",
+      "title": "Long answer shows answer card with Copy",
+      "priority": "P1",
+      "tags": [
+        "island"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Type: ai list five fun facts about octopuses, Enter",
+        "Click Copy",
+        "Paste into Notepad"
+      ],
+      "expected": "Answer card with \"Answer\" header, Copy and ✕; toast \"Copied\"; pasted text matches. Short answers (<55 chars) appear in the pill for ~4 s instead."
+    },
+    {
+      "key": "island.controlcenter.tabs",
+      "area": "island",
+      "title": "Control Center tabs render",
+      "priority": "P1",
+      "tags": [
+        "island",
+        "settings"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\")",
+      "steps": [
+        "Click the gear on the island",
+        "Visit Today, Overview, Integrations, Models, Memory, Privacy tabs",
+        "Press Close"
+      ],
+      "expected": "Each tab renders without blank panels or JS errors; Close returns to the pill."
+    },
+    {
+      "key": "island.dpi.scaling",
+      "area": "island",
+      "title": "Island renders correctly at 150% scaling",
+      "priority": "P2",
+      "tags": [
+        "island",
+        "dpi"
+      ],
+      "preconditions": "Windows display scaling set to 150%",
+      "steps": [
+        "Launch the app",
+        "Trigger a command with an answer card",
+        "Change scaling to 125% while app runs, wait 3 s"
+      ],
+      "expected": "Island is centered, crisp, and click regions align with visuals at both scalings (re-applied within ~2 s)."
+    },
+    {
+      "key": "island.focus.no-steal",
+      "area": "island",
+      "title": "Island does not steal focus",
+      "priority": "P1",
+      "tags": [
+        "island"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); typing in Notepad",
+      "steps": [
+        "While typing in Notepad, say: Hey Jarvis what time is it (or let a timer fire)",
+        "Continue typing"
+      ],
+      "expected": "Keystrokes keep going into Notepad; the island never takes keyboard focus unless the command sheet/Control Center/choice is opened."
+    },
+    {
+      "key": "robustness.nokey.message",
+      "area": "robustness",
+      "title": "Missing API key gives a clear message",
+      "priority": "P0",
+      "tags": [
+        "llm",
+        "negative"
+      ],
+      "preconditions": "config.json with empty api_key; app restarted",
+      "steps": [
+        "Ctrl+Space, type: open notepad, Enter",
+        "Ctrl+Space, type: write me a haiku about winter, Enter"
+      ],
+      "expected": "Notepad still opens (Tier 0). The haiku request shows a clear setup message (e.g. \"LLM not configured. Please complete setup in Settings.\" or \"…check the API key in Settings.\"); no crash."
+    },
+    {
+      "key": "robustness.badkey.message",
+      "area": "robustness",
+      "title": "Invalid API key error",
+      "priority": "P0",
+      "tags": [
+        "llm",
+        "negative"
+      ],
+      "preconditions": "config.json api_key set to 'invalid123'; restart",
+      "steps": [
+        "Ctrl+Space, type: who wrote Hamlet, Enter"
+      ],
+      "expected": "\"My connection to the model was refused — check the API key in Settings.\" (or the orchestrator's unauthorized message); island returns to idle."
+    },
+    {
+      "key": "robustness.offline.llm",
+      "area": "robustness",
+      "title": "Cloud request while offline",
+      "priority": "P0",
+      "tags": [
+        "offline",
+        "negative"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); network disconnected",
+      "steps": [
+        "Ctrl+Space, type: who wrote Hamlet, Enter"
+      ],
+      "expected": "\"I couldn't reach the network for that one.\" (or similar) within ~30 s; island returns to idle; Tier-0 commands keep working."
+    },
+    {
+      "key": "robustness.offline.reconnect",
+      "area": "robustness",
+      "title": "Recovers after network returns",
+      "priority": "P1",
+      "tags": [
+        "offline"
+      ],
+      "preconditions": "Immediately after robustness.offline.llm",
+      "steps": [
+        "Reconnect network",
+        "Ctrl+Space, type: who wrote Hamlet, Enter"
+      ],
+      "expected": "\"William Shakespeare\" answered with no restart."
+    },
+    {
+      "key": "robustness.timeout.slow",
+      "area": "robustness",
+      "title": "Slow model turn times out cleanly",
+      "priority": "P2",
+      "tags": [
+        "llm",
+        "timeout"
+      ],
+      "preconditions": "config.json timeout_seconds: 3; restart",
+      "steps": [
+        "Ctrl+Space, type: research the complete history of the Roman Empire in detail, Enter"
+      ],
+      "expected": "\"That took too long, so I stopped. Try again, or ask for something smaller.\"; island idle; app still responsive."
+    },
+    {
+      "key": "robustness.rapid.commands",
+      "area": "robustness",
+      "title": "Rapid back-to-back commands",
+      "priority": "P1",
+      "tags": [
+        "stress"
+      ],
+      "preconditions": "App running with a valid LLM api_key in config.json; island idle (shows \"Ready\"); command sheet opened with Ctrl+Space",
+      "steps": [
+        "Within 5 s submit: open notepad, volume up, what time is it, open calculator"
+      ],
+      "expected": "All four execute (or are cleanly queued) in order, no crash, no stuck state. Note: the 5 s rate limiter in code is not enforced — record whether any were dropped."
+    },
+    {
+      "key": "robustness.longrun.4h",
+      "area": "robustness",
+      "title": "Long-running session stability",
+      "priority": "P1",
+      "tags": [
+        "soak"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Leave the app running 4 hours with normal use (a command every ~15 min, mixed voice/typed)",
+        "Check Task Manager memory before and after"
+      ],
+      "expected": "All commands still work at the end; wake word still responds; memory growth under ~200 MB; no frozen island."
+    },
+    {
+      "key": "robustness.sleep.resume",
+      "area": "robustness",
+      "title": "Works after PC sleep/resume",
+      "priority": "P1",
+      "tags": [
+        "soak",
+        "power"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room",
+      "steps": [
+        "Put the PC to sleep for 5 minutes",
+        "Wake it and log in",
+        "Say: Hey Jarvis what time is it"
+      ],
+      "expected": "Wake word and answer work without restarting the app; island is still positioned correctly."
+    },
+    {
+      "key": "robustness.mic.unplug",
+      "area": "robustness",
+      "title": "Microphone unplugged and replugged",
+      "priority": "P2",
+      "tags": [
+        "voice",
+        "device"
+      ],
+      "preconditions": "Voice build (go build -tags \"sherpa whisper sqlite_fts5\" ...) running with a valid config.json; microphone connected; quiet room; USB microphone",
+      "steps": [
+        "Unplug the mic",
+        "Say: Hey Jarvis (nothing should happen)",
+        "Plug it back in, wait 10 s",
+        "Say: Hey Jarvis what time is it"
+      ],
+      "expected": "No crash while unplugged; after replug, wake word works again (or record that a restart is needed)."
+    }
+  ]
+}
