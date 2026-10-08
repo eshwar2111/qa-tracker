@@ -1,3 +1,48 @@
-qa.db*
-attachments/
+# --- Build output ---
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+/dist/
+
+# --- Go test / tooling artifacts ---
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+go.work
+go.work.sum
+
+# --- Local data (your test results, remarks, ideas, uploads) ---
+qa.db
+qa.db-wal
+qa.db-shm
+qa.db-journal
+*.db
+*.db-wal
+*.db-shm
+attachments/
+
+# --- Env / secrets ---
+.env
+.env.*
+
+# --- Logs & temp ---
+*.log
+*.tmp
+tmp/
+
+# --- Editors / IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
